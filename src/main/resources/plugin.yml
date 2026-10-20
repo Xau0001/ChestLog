@@ -1,0 +1,11 @@
+name: ChestLog
+version: '${project.version}'
+main: onl.xau.chestlog.ChestLogPlugin
+api-version: '26.3'
+description: '${project.description}'
+author: Xau
+commands:
+  chestlog:
+    description: ChestLog verwalten
+    usage: /chestlog help
+    aliases: [cl]

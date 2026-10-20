@@ -1,0 +1,107 @@
+name: Servertest
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  server-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SPIGOT_REV: '26.3'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Verfügbare spigot-api-Versionen
+        run: |
+          curl -fsSL https://hub.spigotmc.org/nexus/content/repositories/snapshots/org/spigotmc/spigot-api/maven-metadata.xml \
+            | grep -oE '<version>[^<]+' | sed 's/<version>//' | tail -n 15
+
+      - name: BuildTools-Cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/buildtools/out
+          key: spigot-${{ env.SPIGOT_REV }}-v1
+
+      - name: Spigot mit BuildTools bauen
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/buildtools && cd ~/buildtools
+          curl -fsSLo BuildTools.jar https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
+          java -jar BuildTools.jar --rev "$SPIGOT_REV" --output-dir out
+          ls -la out
+
+      - name: Server-JAR untersuchen
+        run: |
+          cd ~/buildtools/out
+          JAR=$(ls spigot-*.jar | head -n1)
+          echo "JAR=$JAR"
+          echo "--- versions.list"; unzip -p "$JAR" META-INF/versions.list || true
+          echo "--- libraries.list"; unzip -p "$JAR" META-INF/libraries.list || true
+          mkdir -p /tmp/inner && cd /tmp/inner
+          unzip -o -q ~/buildtools/out/"$JAR" 'META-INF/versions/*' || true
+          INNER=$(find . -name '*.jar' | head -n1)
+          echo "INNER=${INNER:-keine}"
+          [ -n "$INNER" ] || INNER=~/buildtools/out/"$JAR"
+          unzip -l "$INNER" | grep -iE 'ApiVersion|CraftMagicNumbers' || true
+          for c in $(unzip -l "$INNER" | grep -oE 'org/bukkit/craftbukkit/[^ ]*(ApiVersion|CraftMagicNumbers)\.class'); do
+            unzip -o -q "$INNER" "$c" -d cls
+            echo "=== $c"
+            javap -c -p -constants "cls/$c" | grep -E 'ldc|String ' | head -n 120
+          done
+          echo "--- lokale spigot-api"; ls ~/.m2/repository/org/spigotmc/spigot-api/ || true
+
+      - name: Plugin bauen
+        run: |
+          VER=$(ls ~/.m2/repository/org/spigotmc/spigot-api/ 2>/dev/null | grep -v maven-metadata | sort -V | tail -n1 || true)
+          echo "Lokale spigot-api: ${VER:-keine}"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          mvn -B -ntp package ${VER:+-Dspigot.version=$VER}
+          mvn -B -ntp dependency:copy-dependencies -DincludeScope=provided -DoutputDirectory=target/libs ${VER:+-Dspigot.version=$VER}
+          ls target/libs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compile-classpath
+          path: target/libs
+
+      - name: Server mit Plugin starten
+        run: |
+          mkdir -p server/plugins && cd server
+          cp ~/buildtools/out/spigot-*.jar server.jar
+          cp ../target/ChestLog-*.jar plugins/
+          # Testserver: Mojang-EULA (https://aka.ms/MinecraftEULA) für diesen Lauf akzeptiert
+          echo 'eula=true' > eula.txt
+          printf '%s\n' 'online-mode=false' 'level-type=minecraft\:flat' 'generate-structures=false' \
+            'spawn-protection=0' 'view-distance=4' 'simulation-distance=4' > server.properties
+          touch server.log
+          {
+            for i in $(seq 1 300); do grep -q 'Done (' server.log && break; sleep 1; done
+            for cmd in "plugins" "chestlog help" "chestlog list" "chestlog add NiemandHier" "chestlog reload" "stop"; do
+              echo "$cmd"; sleep 3
+            done
+          } | timeout 900 java -Xms1G -Xmx2G -jar server.jar nogui 2>&1 | tee server.log
+
+      - name: Log prüfen
+        run: |
+          cd server
+          echo "--- ChestLog-Zeilen"; grep -n 'ChestLog' server.log || true
+          echo "--- Exceptions"; grep -n -A15 'Exception' server.log | head -n 200 || true
+          grep -q 'Enabling ChestLog' server.log || { echo "ChestLog wurde nicht aktiviert"; exit 1; }
+          if grep -nE 'WARN\]: \[ChestLog\]|ERROR\]: \[ChestLog\]|onl\.xau\.chestlog|Could not load .*ChestLog' server.log; then
+            echo "Fehler oder Warnungen von ChestLog im Log"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-log
+          path: server/server.log
