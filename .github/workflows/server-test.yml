@@ -1,7 +1,14 @@
 name: Servertest
 
+# Baut Spigot mit BuildTools, startet einen Testserver mit dem Plugin, führt Konsolenbefehle aus und prüft das Log.
+# Der Testserver akzeptiert dafür die Mojang-EULA (https://aka.ms/MinecraftEULA).
+
 on:
   push:
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - '.github/workflows/server-test.yml'
   workflow_dispatch:
 
 jobs:
@@ -39,53 +46,55 @@ jobs:
           java -jar BuildTools.jar --rev "$SPIGOT_REV" --output-dir out
           ls -la out
 
-      - name: Server-JAR untersuchen
+      - name: Server-JAR untersuchen (api-version, mitgelieferte Bibliotheken)
         run: |
           cd ~/buildtools/out
           JAR=$(ls spigot-*.jar | head -n1)
           echo "JAR=$JAR"
           echo "--- versions.list"; unzip -p "$JAR" META-INF/versions.list || true
           echo "--- libraries.list"; unzip -p "$JAR" META-INF/libraries.list || true
+          echo "--- sqlite"; unzip -p "$JAR" META-INF/libraries.list | grep -i sqlite || echo "sqlite-jdbc NICHT mitgeliefert"
           mkdir -p /tmp/inner && cd /tmp/inner
           unzip -o -q ~/buildtools/out/"$JAR" 'META-INF/versions/*' || true
           INNER=$(find . -name '*.jar' | head -n1)
-          echo "INNER=${INNER:-keine}"
           [ -n "$INNER" ] || INNER=~/buildtools/out/"$JAR"
-          unzip -l "$INNER" | grep -iE 'ApiVersion|CraftMagicNumbers' || true
-          for c in $(unzip -l "$INNER" | grep -oE 'org/bukkit/craftbukkit/[^ ]*(ApiVersion|CraftMagicNumbers)\.class'); do
+          echo "INNER=$INNER"
+          for c in $(unzip -l "$INNER" | grep -oE 'org/bukkit/craftbukkit/[^ ]*ApiVersion\.class'); do
             unzip -o -q "$INNER" "$c" -d cls
             echo "=== $c"
-            javap -c -p -constants "cls/$c" | grep -E 'ldc|String ' | head -n 120
+            javap -c -p -constants "cls/$c" | grep -E 'ldc' | head -n 40
           done
-          echo "--- lokale spigot-api"; ls ~/.m2/repository/org/spigotmc/spigot-api/ || true
 
-      - name: Plugin bauen
+      - name: Plugin bauen und testen
         run: |
           VER=$(ls ~/.m2/repository/org/spigotmc/spigot-api/ 2>/dev/null | grep -v maven-metadata | sort -V | tail -n1 || true)
           echo "Lokale spigot-api: ${VER:-keine}"
-          echo "VER=$VER" >> "$GITHUB_ENV"
-          mvn -B -ntp package ${VER:+-Dspigot.version=$VER}
-          mvn -B -ntp dependency:copy-dependencies -DincludeScope=provided -DoutputDirectory=target/libs ${VER:+-Dspigot.version=$VER}
-          ls target/libs
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: compile-classpath
-          path: target/libs
+          mvn -B -ntp verify ${VER:+-Dspigot.version=$VER}
 
       - name: Server mit Plugin starten
         run: |
-          mkdir -p server/plugins && cd server
+          mkdir -p server/plugins/ChestLog && cd server
           cp ~/buildtools/out/spigot-*.jar server.jar
           cp ../target/ChestLog-*.jar plugins/
-          # Testserver: Mojang-EULA (https://aka.ms/MinecraftEULA) für diesen Lauf akzeptiert
           echo 'eula=true' > eula.txt
           printf '%s\n' 'online-mode=false' 'level-type=minecraft\:flat' 'generate-structures=false' \
             'spawn-protection=0' 'view-distance=4' 'simulation-distance=4' > server.properties
+          cat > plugins/ChestLog/admins.yml <<'EOF'
+          admins:
+            11111111-2222-4333-8444-555555555555:
+              name: TestAdminA
+              added-by: CONSOLE
+              added-at: "2026-10-20T18:50:00+02:00"
+            66666666-7777-4888-8999-aaaaaaaaaaaa:
+              name: TestAdminB
+              added-by: TestAdminA
+              added-at: "2026-10-20T19:00:00+02:00"
+          EOF
           touch server.log
           {
             for i in $(seq 1 300); do grep -q 'Done (' server.log && break; sleep 1; done
-            for cmd in "plugins" "chestlog help" "chestlog list" "chestlog add NiemandHier" "chestlog reload" "stop"; do
+            for cmd in "plugins" "chestlog help" "chestlog list" "chestlog remove TestAdminB" "chestlog list" \
+                        "chestlog add NiemandHier" "chestlog reload" "cl list" "stop"; do
               echo "$cmd"; sleep 3
             done
           } | timeout 900 java -Xms1G -Xmx2G -jar server.jar nogui 2>&1 | tee server.log
@@ -93,12 +102,27 @@ jobs:
       - name: Log prüfen
         run: |
           cd server
-          echo "--- ChestLog-Zeilen"; grep -n 'ChestLog' server.log || true
-          echo "--- Exceptions"; grep -n -A15 'Exception' server.log | head -n 200 || true
-          grep -q 'Enabling ChestLog' server.log || { echo "ChestLog wurde nicht aktiviert"; exit 1; }
-          if grep -nE 'WARN\]: \[ChestLog\]|ERROR\]: \[ChestLog\]|onl\.xau\.chestlog|Could not load .*ChestLog' server.log; then
-            echo "Fehler oder Warnungen von ChestLog im Log"; exit 1
+          # Farbcodes (ANSI und §) entfernen, damit Texte am Stück gesucht werden können
+          sed -E 's/\x1b\[[0-9;]*m//g; s/§.//g' server.log > clean.log
+          echo "--- ChestLog-Zeilen"; grep -n -i 'chestlog' clean.log || true
+          echo "--- Exceptions"; grep -n -A15 'Exception' clean.log | head -n 200 || true
+          fail() { echo "FEHLER: $1"; exit 1; }
+          grep -q 'Enabling ChestLog' clean.log || fail "ChestLog wurde nicht aktiviert"
+          if grep -nE 'WARN\]: \[ChestLog\]|ERROR\]: \[ChestLog\]|onl\.xau\.chestlog|Could not load .*ChestLog' clean.log; then
+            fail "Fehler oder Warnungen von ChestLog im Log"
           fi
+          grep -q 'Berechtigte Spieler (2)' clean.log || fail "chestlog list zeigt nicht beide Admins"
+          grep -q 'TestAdminB ist nicht mehr berechtigt' clean.log || fail "chestlog remove hat nicht funktioniert"
+          grep -q 'Berechtigte Spieler (1)' clean.log || fail "chestlog list nach remove falsch"
+          grep -q 'Spieler war noch nie auf dem Server: NiemandHier' clean.log || fail "chestlog add ohne Spieler falsch"
+          grep -q 'Config und admins.yml neu geladen' clean.log || fail "chestlog reload hat nicht funktioniert"
+          echo "--- admins.yml"; cat plugins/ChestLog/admins.yml
+          grep -q 'TestAdminA' plugins/ChestLog/admins.yml || fail "TestAdminA fehlt in admins.yml"
+          if grep -q 'TestAdminB' plugins/ChestLog/admins.yml; then fail "TestAdminB steht noch in admins.yml"; fi
+          [ ! -e plugins/ChestLog/admins.yml.tmp ] || fail "temporäre admins.yml liegt noch herum"
+          [ -s plugins/ChestLog/chestlog.db ] || fail "chestlog.db fehlt"
+          [ -s plugins/ChestLog/config.yml ] || fail "config.yml fehlt"
+          echo "Servertest bestanden"
 
       - uses: actions/upload-artifact@v4
         if: always()

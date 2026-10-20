@@ -1,0 +1,34 @@
+# ChestLog – Konfiguration
+# Nach Änderungen: /chestlog reload
+
+# Werkzeug, mit dem Berechtigte per Rechtsklick das Log eines Containers öffnen (Material-Name)
+tool: WOODEN_PICKAXE
+
+# Öffnen von Containern loggen
+log-open: true
+
+# Hineinlegen/Entnehmen desselben Spielers, derselben Item-Art und desselben Containers innerhalb dieser
+# Sekunden zu einem Eintrag zusammenfassen. Ein erneutes Öffnen im selben Zeitraum wird nicht doppelt geloggt.
+merge-window-seconds: 10
+
+# Höchstens so viele Einträge (die neuesten) werden pro Container im Log-Fenster geladen
+max-gui-entries: 2000
+
+# Einträge, die älter sind, werden beim Start und einmal täglich gelöscht. 0 = nie löschen
+retention-days: 180
+
+# Zeitzone für die Anzeige (z. B. Europe/Berlin, UTC)
+timezone: Europe/Berlin
+
+# Berechtigte können mit dem Werkzeug in der Hand keine Container abbauen
+protect-containers-with-tool: true
+
+# Leer = alle Container außer der Endertruhe. Sonst eine Liste von Materialien, z. B.:
+# containers:
+#   - CHEST
+#   - TRAPPED_CHEST
+#   - BARREL
+containers: []
+
+# Welten, in denen nichts geloggt wird (Weltnamen)
+disabled-worlds: []
