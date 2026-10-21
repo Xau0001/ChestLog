@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Container;
 import org.bukkit.block.ShulkerBox;
@@ -29,6 +30,7 @@ import onl.xau.chestlog.container.ContainerResolver;
 import onl.xau.chestlog.container.ContainerTarget;
 import onl.xau.chestlog.container.ItemKey;
 import onl.xau.chestlog.diff.InventoryDiff;
+import onl.xau.chestlog.model.BlockPos;
 
 /**
  * Logging von OPEN, ADD/REMOVE (Diff pro Klick), PLACE, BREAK und DROP.
@@ -115,17 +117,19 @@ public final class ContainerListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
-        ContainerTarget target = resolver.resolve(event.getBlock());
+        Block block = event.getBlock();
+        ContainerTarget target = resolver.resolve(block);
         if (target == null) {
             return;
         }
         Map<ItemKey, Integer> drops = Map.of();
-        BlockState state = event.getBlock().getState();
+        BlockState state = block.getState();
         // Shulkerkisten behalten ihren Inhalt im Item, da fällt nichts heraus.
         if (state instanceof Container container && !(state instanceof ShulkerBox)) {
             drops = snapshot(container.getSnapshotInventory());
         }
-        log.logBreak(event.getPlayer(), target, drops);
+        BlockPos broken = new BlockPos(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ());
+        log.logBreak(event.getPlayer(), target, broken, drops);
     }
 
     /** Wertet alle geplanten Vergleiche sofort aus, z. B. beim Deaktivieren des Plugins. */

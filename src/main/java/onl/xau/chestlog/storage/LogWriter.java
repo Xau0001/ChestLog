@@ -79,6 +79,14 @@ public final class LogWriter implements AutoCloseable {
         });
     }
 
+    /** Verschiebt asynchron alle Einträge (auch die noch eingereihten) von {@code from} nach {@code to}. */
+    public CompletableFuture<Integer> relocate(BlockPos from, BlockPos to) {
+        return supply(() -> {
+            flush();
+            return database.relocate(from, to);
+        });
+    }
+
     /** Löscht asynchron alle Einträge, die älter als {@code cutoffMillis} sind. */
     public CompletableFuture<Integer> deleteOlderThan(long cutoffMillis) {
         return supply(() -> {

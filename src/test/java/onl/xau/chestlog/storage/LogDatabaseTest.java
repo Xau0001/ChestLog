@@ -3,6 +3,7 @@ package onl.xau.chestlog.storage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -150,6 +151,27 @@ class LogDatabaseTest {
         assertEquals(List.of("NEW"),
                 db.query(List.of(LEFT, RIGHT), 10).entries().stream().map(LogEntry::material).toList());
         assertEquals(1, db.query(List.of(OTHER), 10).entries().size());
+    }
+
+    @Test
+    void umzugAufDieStehengebliebeneHaelfte() throws SQLException {
+        db.insert(List.of(
+                entry(LEFT, 1_000, LogAction.ADD, "A", 1),
+                entry(LEFT, 2_000, LogAction.ADD, "B", 1),
+                entry(RIGHT, 3_000, LogAction.ADD, "C", 1),
+                entry(OTHER, 4_000, LogAction.ADD, "D", 1)));
+
+        assertEquals(2, db.relocate(LEFT, RIGHT));
+
+        assertEquals(List.of("C", "B", "A"),
+                db.query(List.of(RIGHT), 10).entries().stream().map(LogEntry::material).toList());
+        assertTrue(db.query(List.of(LEFT), 10).entries().isEmpty());
+        assertEquals(1, db.query(List.of(OTHER), 10).entries().size());
+    }
+
+    @Test
+    void umzugNurInnerhalbEinerWelt() {
+        assertThrows(IllegalArgumentException.class, () -> db.relocate(LEFT, new BlockPos(NETHER, 10, 64, 20)));
     }
 
     @Test

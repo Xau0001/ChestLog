@@ -77,7 +77,7 @@ Darunter folgen Spieler, Zeit (`20.10.2026 18:46:12`, Zeitzone aus der Config) u
 
 Aus dem Fenster lässt sich nichts herausnehmen und nichts hineinlegen (Klick, Shift-Klick, Zahlentasten, Doppelklick, Drag, Q).
 
-Bei Doppeltruhen zeigt das Fenster immer die Einträge **beider Hälften**, auch alte Einträge aus der Zeit, als es noch eine Einzeltruhe war.
+Bei Doppeltruhen zeigt das Fenster immer die Einträge **beider Hälften**, auch alte Einträge aus der Zeit, als es noch eine Einzeltruhe war. Wird eine Hälfte abgebaut, ziehen ihre Einträge auf die stehengebliebene Hälfte um. Die gemeinsame Historie, der Abbau und die herausgefallenen Items bleiben so an der übrigen Truhe sichtbar.
 
 ## Befehle
 
@@ -200,7 +200,7 @@ Die Abhängigkeit `org.spigotmc:spigot-api` (Scope `provided`) kommt aus `https:
 - `InventoryDiffTest`: Hinzufügen, Entnehmen, Umsortieren (kein Eintrag), Tausch zweier Item-Arten, teilweise Stacks, leere Inventare
 - `EntryMergerTest`: Zusammenfassen im Zeitfenster, Trennen danach, getrennte Richtungen/Spieler/Container, OPEN nur einmal pro Fenster
 - `AdminStoreTest`: `admins.yml` lesen, schreiben (atomar), Name aktualisieren, letzten Admin schützen
-- `LogDatabaseTest` / `LogWriterTest`: gegen eine temporäre SQLite-Datei: Insert, Abfrage beider Doppeltruhen-Hälften, Sortierung, Limit mit Gesamtzahl, Purge, Nutzung des Index, Queue und Batches
+- `LogDatabaseTest` / `LogWriterTest`: gegen eine temporäre SQLite-Datei: Insert, Abfrage beider Doppeltruhen-Hälften, Sortierung, Limit mit Gesamtzahl, Purge, Umzug nach Abbau einer Hälfte, Nutzung des Index, Queue und Batches
 - `ScrollerTest`, `TimeFormatTest`: Scrollen im Fenster, Zeitangaben
 
 **GitHub Actions:**
@@ -242,6 +242,7 @@ Punkte, an denen die Umsetzung von den Vorgaben abweicht oder die beim Schreiben
 - **Suche bei `add` asynchron:** `Bukkit.getOfflinePlayers()` liest Spielerdateien von der Platte und läuft deshalb nicht auf dem Main-Thread.
 - **Buttons:** Pfeil (Zeile) und Spektralpfeil (Seite) mit den Beschriftungen „▲ Eine Zeile hoch“ bzw. „▲▲ Eine Seite hoch“; die Zeichen ⏫/⏬ fehlen in manchen Schriftarten.
 - **Filter „nur Entnahmen“** zeigt auch „beim Abbau herausgefallen“, weil diese Items den Container ebenfalls verlassen haben.
+- **Abbau einer Doppeltruhen-Hälfte:** Die Vorgabe speichert unter der kanonischen Hälfte und fragt beide Hälften ab. Nach dem Abbau einer Hälfte wäre die gemeinsame Historie von der übrigen Truhe aus nicht mehr zu sehen, ein Dieb könnte so seine Spuren verwischen. Deshalb werden in diesem Fall „abgebaut“ und „herausgefallen“ an der stehengebliebenen Hälfte gespeichert, und alle Einträge der abgebauten Position ziehen dorthin um.
 
 ## Manuelle Checkliste
 

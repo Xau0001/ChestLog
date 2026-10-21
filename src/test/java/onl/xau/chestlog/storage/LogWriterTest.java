@@ -21,6 +21,7 @@ class LogWriterTest {
 
     private static final Logger LOGGER = Logger.getLogger(LogWriterTest.class.getName());
     private static final BlockPos POS = new BlockPos(UUID.randomUUID(), 1, 2, 3);
+    private static final BlockPos NEIGHBOUR = new BlockPos(POS.world(), 2, 2, 3);
 
     @TempDir
     Path dir;
@@ -87,6 +88,19 @@ class LogWriterTest {
 
         try (LogDatabase db = LogDatabase.open(file)) {
             assertEquals(250, db.query(List.of(POS), 1_000).entries().size());
+        }
+    }
+
+    @Test
+    void umzugErfasstAuchEingereihteEintraege() throws Exception {
+        try (LogWriter writer = new LogWriter(LogDatabase.open(dir.resolve("f.db")), LOGGER, 100,
+                Duration.ofHours(1))) {
+            writer.submit(entry(1_000));
+            writer.submit(entry(2_000));
+
+            assertEquals(2, writer.relocate(POS, NEIGHBOUR).get(10, TimeUnit.SECONDS));
+            assertEquals(2, writer.query(List.of(NEIGHBOUR), 10).get(10, TimeUnit.SECONDS).entries().size());
+            assertEquals(0, writer.query(List.of(POS), 10).get(10, TimeUnit.SECONDS).entries().size());
         }
     }
 

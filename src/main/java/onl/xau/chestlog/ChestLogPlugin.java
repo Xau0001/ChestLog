@@ -69,7 +69,7 @@ public final class ChestLogPlugin extends JavaPlugin {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
-        logService = new LogService(writer, this::settings);
+        logService = new LogService(writer, this::settings, getLogger());
 
         ContainerResolver resolver = new ContainerResolver(this::settings);
         gui = new LogGui(this, logService, this::settings, getLogger());

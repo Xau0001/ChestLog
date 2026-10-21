@@ -165,6 +165,24 @@ public final class LogDatabase implements AutoCloseable {
         }
     }
 
+    /**
+     * Verschiebt alle Einträge von {@code from} nach {@code to} (gleiche Welt), z. B. von einer abgebauten
+     * Doppeltruhen-Hälfte auf die stehengebliebene. Liefert die Anzahl der verschobenen Einträge.
+     */
+    public int relocate(BlockPos from, BlockPos to) throws SQLException {
+        if (!from.world().equals(to.world())) {
+            throw new IllegalArgumentException("Umzug nur innerhalb einer Welt: " + from + " -> " + to);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "UPDATE log SET x = ?, y = ?, z = ? WHERE " + whereClause(1))) {
+            ps.setInt(1, to.x());
+            ps.setInt(2, to.y());
+            ps.setInt(3, to.z());
+            bindPositions(ps, List.of(from), 4);
+            return ps.executeUpdate();
+        }
+    }
+
     /** Für Tests: der Abfrageplan der Positionsabfrage. */
     String explainQuery(List<BlockPos> positions) throws SQLException {
         StringBuilder plan = new StringBuilder();
@@ -199,7 +217,12 @@ public final class LogDatabase implements AutoCloseable {
     }
 
     private static int bindPositions(PreparedStatement ps, List<BlockPos> positions) throws SQLException {
-        int index = 1;
+        return bindPositions(ps, positions, 1);
+    }
+
+    private static int bindPositions(PreparedStatement ps, List<BlockPos> positions, int firstIndex)
+            throws SQLException {
+        int index = firstIndex;
         for (BlockPos pos : positions) {
             ps.setString(index++, pos.world().toString());
             ps.setInt(index++, pos.x());
