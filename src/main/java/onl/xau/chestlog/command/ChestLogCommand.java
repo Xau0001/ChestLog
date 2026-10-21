@@ -5,6 +5,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -92,10 +93,7 @@ public final class ChestLogCommand implements TabExecutor {
     }
 
     private boolean isAllowed(CommandSender sender) {
-        if (sender instanceof ConsoleCommandSender || sender instanceof RemoteConsoleCommandSender) {
-            return true;
-        }
-        return sender instanceof Player player && admins.isAdmin(player.getUniqueId());
+        return isConsole(sender) || sender instanceof Player player && admins.isAdmin(player.getUniqueId());
     }
 
     private static boolean isConsole(CommandSender sender) {
@@ -104,32 +102,49 @@ public final class ChestLogCommand implements TabExecutor {
 
     private void add(CommandSender sender, String label, String[] args) {
         if (args.length != 2) {
-            sender.sendMessage(Messages.error("Benutzung: /" + label + " add <Spieler>"));
+            sender.sendMessage(Messages.error("Benutzung: /" + label + " add <Spieler oder UUID>"));
             return;
         }
-        String name = args[1];
-        Player online = plugin.getServer().getPlayerExact(name);
-        if (online != null) {
-            finishAdd(sender, online.getUniqueId(), online.getName());
-            return;
+        String input = args[1];
+        UUID uuid = parseUuid(input);
+        if (uuid == null) {
+            Player online = plugin.getServer().getPlayerExact(input);
+            if (online != null) {
+                finishAdd(sender, online.getUniqueId(), online.getName());
+                return;
+            }
         }
-        // getOfflinePlayers() liest Spielerdateien, daher nicht auf dem Main-Thread. Kein Mojang-Lookup.
+        // Kein Mojang-Lookup: nur Spieler, die schon auf dem Server waren. getOfflinePlayers() listet dafür nur das
+        // Spielerdaten-Verzeichnis (Main-Thread, wegen der Spielerliste). Die Namen stehen teils erst in den
+        // Spielerdateien, deshalb werden sie asynchron gelesen.
+        OfflinePlayer[] candidates = uuid != null
+                ? new OfflinePlayer[] {plugin.getServer().getOfflinePlayer(uuid)}
+                : plugin.getServer().getOfflinePlayers();
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
-            OfflinePlayer found = null;
-            for (OfflinePlayer player : plugin.getServer().getOfflinePlayers()) {
+            Map<UUID, String> matches = new LinkedHashMap<>();
+            for (OfflinePlayer player : candidates) {
                 String playerName = player.getName();
-                if (playerName != null && playerName.equalsIgnoreCase(name)) {
-                    found = player;
-                    break;
+                boolean match = uuid != null
+                        ? player.isOnline() || player.hasPlayedBefore()
+                        : playerName != null && playerName.equalsIgnoreCase(input);
+                if (match) {
+                    matches.put(player.getUniqueId(), playerName);
                 }
             }
-            UUID uuid = found == null ? null : found.getUniqueId();
-            String foundName = found == null ? null : found.getName();
             plugin.runSync(() -> {
-                if (uuid == null) {
-                    sender.sendMessage(Messages.error("Spieler war noch nie auf dem Server: " + name));
+                if (!isAllowed(sender)) {
+                    sender.sendMessage(Messages.NO_PERMISSION); // inzwischen entfernt
+                } else if (matches.isEmpty()) {
+                    sender.sendMessage(Messages.error("Spieler war noch nie auf dem Server: " + input));
+                } else if (matches.size() > 1) {
+                    // z. B. nach einer Namensänderung: ein alter Account trägt den Namen noch in seinen Daten
+                    sender.sendMessage(Messages.error("Mehrere Spieler hießen " + input
+                            + ". Bitte mit der UUID hinzufügen: /" + label + " add <UUID>"));
+                    matches.keySet().forEach(id -> sender.sendMessage(ChatColor.DARK_GRAY + " - " + ChatColor.WHITE
+                            + id));
                 } else {
-                    finishAdd(sender, uuid, foundName);
+                    Map.Entry<UUID, String> match = matches.entrySet().iterator().next();
+                    finishAdd(sender, match.getKey(), match.getValue() == null ? input : match.getValue());
                 }
             });
         });
@@ -157,14 +172,8 @@ public final class ChestLogCommand implements TabExecutor {
             sender.sendMessage(Messages.error("Benutzung: /" + label + " remove <Spieler>"));
             return;
         }
-        Admin admin = admins.findByName(args[1]).orElse(null);
-        if (admin == null) {
-            try {
-                admin = admins.get(UUID.fromString(args[1])).orElse(null);
-            } catch (IllegalArgumentException e) {
-                // kein UUID-Format
-            }
-        }
+        UUID uuid = parseUuid(args[1]);
+        Admin admin = uuid != null ? admins.get(uuid).orElse(null) : admins.findByName(args[1]).orElse(null);
         if (admin == null) {
             sender.sendMessage(Messages.error(args[1] + " steht nicht in der Liste."));
             return;
@@ -172,7 +181,8 @@ public final class ChestLogCommand implements TabExecutor {
         switch (admins.remove(admin.uuid(), isConsole(sender))) {
             case REMOVED -> {
                 save(sender);
-                sender.sendMessage(Messages.info(ChatColor.WHITE + admin.name() + ChatColor.GRAY
+                plugin.closeLogWindow(admin.uuid());
+                sender.sendMessage(Messages.info(ChatColor.WHITE + displayName(admin) + ChatColor.GRAY
                         + " ist nicht mehr berechtigt."));
             }
             case LAST_ADMIN -> sender.sendMessage(Messages.error(
@@ -189,7 +199,7 @@ public final class ChestLogCommand implements TabExecutor {
         }
         sender.sendMessage(Messages.info("Berechtigte Spieler (" + list.size() + "):"));
         for (Admin admin : list) {
-            sender.sendMessage(ChatColor.DARK_GRAY + " - " + ChatColor.WHITE + admin.name()
+            sender.sendMessage(ChatColor.DARK_GRAY + " - " + ChatColor.WHITE + displayName(admin)
                     + ChatColor.GRAY + ", hinzugefügt von " + ChatColor.WHITE + admin.addedBy()
                     + ChatColor.GRAY + " am " + ChatColor.WHITE + formatDate(admin.addedAt()));
         }
@@ -221,8 +231,8 @@ public final class ChestLogCommand implements TabExecutor {
     private static void help(CommandSender sender, String label) {
         String cmd = ChatColor.WHITE + "/" + label + " ";
         sender.sendMessage(Messages.info("Befehle:"));
-        sender.sendMessage(cmd + "add <Spieler>" + ChatColor.GRAY + " – Spieler berechtigen");
-        sender.sendMessage(cmd + "remove <Spieler>" + ChatColor.GRAY + " – Berechtigung entfernen");
+        sender.sendMessage(cmd + "add <Spieler|UUID>" + ChatColor.GRAY + " – Spieler berechtigen");
+        sender.sendMessage(cmd + "remove <Spieler|UUID>" + ChatColor.GRAY + " – Berechtigung entfernen");
         sender.sendMessage(cmd + "list" + ChatColor.GRAY + " – alle Berechtigten");
         sender.sendMessage(cmd + "tool" + ChatColor.GRAY + " – Werkzeug zum Untersuchen");
         sender.sendMessage(cmd + "reload" + ChatColor.GRAY + " – Config und admins.yml neu laden");
@@ -245,6 +255,18 @@ public final class ChestLogCommand implements TabExecutor {
             return OffsetDateTime.parse(isoDate).atZoneSameInstant(plugin.settings().timezone()).format(LIST_DATE);
         } catch (DateTimeParseException e) {
             return isoDate;
+        }
+    }
+
+    private static String displayName(Admin admin) {
+        return admin.name() == null ? admin.uuid().toString() : admin.name();
+    }
+
+    private static UUID parseUuid(String text) {
+        try {
+            return text.length() == 36 ? UUID.fromString(text) : null;
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 

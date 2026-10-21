@@ -48,6 +48,8 @@ public final class AdminStore {
     private final Path file;
     private final Executor writeExecutor;
     private volatile Map<UUID, Admin> admins = Map.of();
+    // zählt jede Änderung, damit ein Neuladen erkennt, ob es inzwischen veraltet ist
+    private int version;
 
     public AdminStore(Path file, Executor writeExecutor) {
         this.file = file;
@@ -69,6 +71,12 @@ public final class AdminStore {
     /** Übernimmt eine gelesene Liste, z. B. nach {@link #read(Path)}. */
     public void replaceAll(Map<UUID, Admin> loaded) {
         admins = Map.copyOf(loaded);
+        version++;
+    }
+
+    /** Zählt die Änderungen; steigt bei jedem add, remove, updateName und replaceAll. */
+    public int version() {
+        return version;
     }
 
     public boolean isAdmin(UUID uuid) {
@@ -102,6 +110,7 @@ public final class AdminStore {
         Map<UUID, Admin> copy = new LinkedHashMap<>(admins);
         copy.put(admin.uuid(), admin);
         admins = Map.copyOf(copy);
+        version++;
         return true;
     }
 
@@ -118,6 +127,7 @@ public final class AdminStore {
         Map<UUID, Admin> copy = new LinkedHashMap<>(admins);
         copy.remove(uuid);
         admins = Map.copyOf(copy);
+        version++;
         return RemoveResult.REMOVED;
     }
 
@@ -130,6 +140,7 @@ public final class AdminStore {
         Map<UUID, Admin> copy = new LinkedHashMap<>(admins);
         copy.put(uuid, new Admin(uuid, name, admin.addedBy(), admin.addedAt()));
         admins = Map.copyOf(copy);
+        version++;
         return true;
     }
 

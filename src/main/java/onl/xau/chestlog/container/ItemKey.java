@@ -10,9 +10,14 @@ import org.bukkit.inventory.ItemStack;
 public final class ItemKey {
 
     private final ItemStack stack;
+    private final int hash;
 
     private ItemKey(ItemStack stack) {
         this.stack = stack;
+        // ItemStack#hashCode passt zu equals, bei Menge 1 also zu isSimilar. Ein reiner Material-Hash würde z. B. in
+        // einer Kiste voller verschiedener verzauberter Bücher alle Schlüssel kollidieren lassen (quadratischer
+        // Aufwand pro Klick).
+        this.hash = stack.hashCode();
     }
 
     /** Schlüssel für den Stack oder {@code null} für leere Slots. */
@@ -36,13 +41,12 @@ public final class ItemKey {
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof ItemKey other && stack.isSimilar(other.stack);
+        return o instanceof ItemKey other && hash == other.hash && stack.isSimilar(other.stack);
     }
 
-    // Grob, aber passend zu isSimilar: ähnliche Items haben immer dasselbe Material.
     @Override
     public int hashCode() {
-        return stack.getType().hashCode();
+        return hash;
     }
 
     @Override

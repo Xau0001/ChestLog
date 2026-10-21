@@ -41,51 +41,61 @@ public final class ContainerResolver {
             return null;
         }
         Material type = block.getType();
-        if (!isAllowed(type, block.getWorld())) {
+        if (!isAllowed(type, block.getWorld()) || !isContainer(block)) {
             return null;
         }
-        Boolean container = containerMaterials.get(type);
-        if (container == null) {
-            container = block.getState() instanceof Container;
-            containerMaterials.put(type, container);
-        }
-        return container ? target(block, type) : null;
+        Block other = otherChestHalf(block);
+        return other == null ? single(block, type) : pair(block, other, type);
     }
 
     /** Der erfasste Container, zu dem dieses Inventar gehört, oder {@code null}. */
     public ContainerTarget resolve(Inventory inventory) {
         InventoryHolder holder = inventory.getHolder();
-        Block block;
-        Block other = null;
         if (holder instanceof DoubleChest doubleChest
                 && doubleChest.getLeftSide() instanceof BlockState left
                 && doubleChest.getRightSide() instanceof BlockState right) {
-            block = left.getBlock();
-            other = right.getBlock();
-        } else if (holder instanceof Container container) {
-            block = container.getBlock();
-        } else {
-            return null;
+            Block block = left.getBlock();
+            Material type = block.getType();
+            if (!isAllowed(type, block.getWorld())) {
+                return null;
+            }
+            containerMaterials.put(type, true);
+            containerMaterials.put(right.getType(), true);
+            return pair(block, right.getBlock(), type);
         }
-        Material type = block.getType();
-        if (!isAllowed(type, block.getWorld())) {
-            return null;
+        if (holder instanceof Container container) {
+            Block block = container.getBlock();
+            Material type = block.getType();
+            if (!isAllowed(type, block.getWorld())) {
+                return null;
+            }
+            containerMaterials.put(type, true);
+            Block other = otherChestHalf(block);
+            return other == null ? single(block, type) : pair(block, other, type);
         }
-        containerMaterials.put(type, true);
-        return other != null ? target(block, other, type) : target(block, type);
+        return null;
     }
 
-    /** Prüft, ob der Container noch steht. Ungeladene Chunks werden nicht geladen und gelten als vorhanden. */
+    /**
+     * Prüft, ob noch alle Teile des Containers stehen. Ungeladene Chunks werden nicht geladen und gelten als
+     * vorhanden.
+     */
     public boolean isStillPresent(ContainerTarget target) {
         World world = Bukkit.getWorld(target.worldId());
         if (world == null) {
             return false;
         }
-        BlockPos pos = target.canonical();
-        if (!world.isChunkLoaded(pos.x() >> 4, pos.z() >> 4)) {
-            return true;
+        for (BlockPos pos : target.positions()) {
+            if (world.isChunkLoaded(pos.x() >> 4, pos.z() >> 4)
+                    && !isContainer(world.getBlockAt(pos.x(), pos.y(), pos.z()))) {
+                return false;
+            }
         }
-        return world.getBlockAt(pos.x(), pos.y(), pos.z()).getType() == target.material();
+        return true;
+    }
+
+    public static BlockPos pos(Block block) {
+        return new BlockPos(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ());
     }
 
     private boolean isAllowed(Material type, World world) {
@@ -93,16 +103,22 @@ public final class ContainerResolver {
         return type != Material.ENDER_CHEST && config.isContainerAllowed(type) && !config.isWorldDisabled(world);
     }
 
-    private static ContainerTarget target(Block block, Material type) {
-        Block other = otherChestHalf(block);
-        if (other == null) {
-            BlockPos own = pos(block);
-            return new ContainerTarget(block.getWorld().getName(), own, List.of(own), type);
+    private boolean isContainer(Block block) {
+        Material type = block.getType();
+        Boolean container = containerMaterials.get(type);
+        if (container == null) {
+            container = block.getState() instanceof Container;
+            containerMaterials.put(type, container);
         }
-        return target(block, other, type);
+        return container;
     }
 
-    private static ContainerTarget target(Block block, Block other, Material type) {
+    private static ContainerTarget single(Block block, Material type) {
+        BlockPos own = pos(block);
+        return new ContainerTarget(block.getWorld().getName(), own, List.of(own), type);
+    }
+
+    private static ContainerTarget pair(Block block, Block other, Material type) {
         BlockPos own = pos(block);
         BlockPos otherPos = pos(other);
         return new ContainerTarget(block.getWorld().getName(), BlockPos.min(own, otherPos), List.of(own, otherPos),
@@ -118,22 +134,14 @@ public final class ContainerResolver {
         if (chest.getType() == Chest.Type.SINGLE) {
             return null;
         }
-        // Wie in Vanilla: LEFT verbindet im Uhrzeigersinn der Blickrichtung, RIGHT dagegen.
+        // Wie in Vanilla (ChestBlock#getConnectedDirection): LEFT verbindet im Uhrzeigersinn der Blickrichtung,
+        // RIGHT dagegen. Nur diese eine Richtung ist die Partnerhälfte. Deren Typ wird nicht verlangt: direkt nach dem
+        // Platzieren ist sie noch SINGLE. Das Material auch nicht: Kupfertruhen verschiedener Stufen können ein Paar
+        // bilden.
         BlockFace facing = chest.getFacing();
-        BlockFace expected = chest.getType() == Chest.Type.LEFT ? clockwise(facing) : counterClockwise(facing);
-        Chest.Type opposite = chest.getType() == Chest.Type.LEFT ? Chest.Type.RIGHT : Chest.Type.LEFT;
-        for (BlockFace direction : new BlockFace[] {expected, expected.getOppositeFace()}) {
-            Block neighbour = block.getRelative(direction);
-            if (neighbour.getType() == block.getType()
-                    && neighbour.getBlockData() instanceof Chest other
-                    && other.getType() == opposite
-                    && other.getFacing() == facing) {
-                return neighbour;
-            }
-        }
-        // Direkt nach dem Platzieren ist die Nachbarhälfte noch nicht aktualisiert.
-        Block neighbour = block.getRelative(expected);
-        return neighbour.getType() == block.getType() ? neighbour : null;
+        BlockFace direction = chest.getType() == Chest.Type.LEFT ? clockwise(facing) : counterClockwise(facing);
+        Block neighbour = block.getRelative(direction);
+        return neighbour.getBlockData() instanceof Chest other && other.getFacing() == facing ? neighbour : null;
     }
 
     // Für Truhenarten, deren BlockData nicht Chest ist: über das Inventar. Teurer, daher nur bei *CHEST-Materialien.
@@ -167,9 +175,5 @@ public final class ContainerResolver {
             case EAST -> BlockFace.NORTH;
             default -> face;
         };
-    }
-
-    private static BlockPos pos(Block block) {
-        return new BlockPos(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ());
     }
 }

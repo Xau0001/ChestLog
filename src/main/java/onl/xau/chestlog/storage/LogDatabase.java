@@ -9,7 +9,11 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -45,8 +49,9 @@ public final class LogDatabase implements AutoCloseable {
     private static final String INSERT = """
             INSERT INTO log (ts, world, x, y, z, player_uuid, player_name, action, material, amount, item)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""";
-    private static final String COLUMNS =
-            "id, ts, world, x, y, z, player_uuid, player_name, action, material, amount, item";
+    // ohne item: das YAML kann groß sein und wird nur für sichtbare Einträge nachgeladen
+    private static final String COLUMNS = "id, ts, world, x, y, z, player_uuid, player_name, action, material, amount";
+    private static final int MAX_IDS_PER_QUERY = 500;
 
     private final Connection connection;
 
@@ -122,20 +127,25 @@ public final class LogDatabase implements AutoCloseable {
 
     /**
      * Lädt die neuesten {@code limit} Einträge an allen angegebenen Positionen (z. B. beiden Hälften einer
-     * Doppeltruhe) in einer Abfrage, neueste zuerst.
+     * Doppeltruhe) in einer Abfrage, neueste zuerst. Das Item-YAML wird nicht mitgeladen, siehe {@link #loadItems}.
      */
     public QueryResult query(List<BlockPos> positions, int limit) throws SQLException {
         if (positions.isEmpty() || limit <= 0) {
-            return new QueryResult(List.of(), 0, 0);
+            return new QueryResult(List.of(), 0, 0, false);
         }
         String where = whereClause(positions.size());
         List<LogEntry> entries = new ArrayList<>();
+        // Zeilen zählen, nicht Einträge: unlesbare Zeilen werden übersprungen, zählen aber fürs Limit.
+        int rows = 0;
+        long oldestRow = 0;
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT " + COLUMNS + " FROM log WHERE " + where + " ORDER BY ts DESC, id DESC LIMIT ?")) {
             int index = bindPositions(ps, positions);
             ps.setInt(index, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
+                    rows++;
+                    oldestRow = rs.getLong("ts");
                     LogEntry entry = read(rs);
                     if (entry != null) {
                         entries.add(entry);
@@ -143,18 +153,40 @@ public final class LogDatabase implements AutoCloseable {
                 }
             }
         }
-        if (entries.size() < limit) {
-            long oldest = entries.isEmpty() ? 0 : entries.getLast().timestamp();
-            return new QueryResult(entries, entries.size(), oldest);
+        if (rows < limit) {
+            return new QueryResult(entries, entries.size(), oldestRow, false);
         }
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT COUNT(*), MIN(ts) FROM log WHERE " + where)) {
             bindPositions(ps, positions);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
-                return new QueryResult(entries, rs.getLong(1), rs.getLong(2));
+                long total = rs.getLong(1);
+                return new QueryResult(entries, total, rs.getLong(2), total > rows);
             }
         }
+    }
+
+    /** Lädt das Item-YAML zu den IDs. IDs ohne gespeichertes Item fehlen in der Map. */
+    public Map<Long, String> loadItems(Collection<Long> ids) throws SQLException {
+        Map<Long, String> items = new HashMap<>();
+        List<Long> list = List.copyOf(ids);
+        for (int from = 0; from < list.size(); from += MAX_IDS_PER_QUERY) {
+            List<Long> chunk = list.subList(from, Math.min(list.size(), from + MAX_IDS_PER_QUERY));
+            String placeholders = String.join(", ", Collections.nCopies(chunk.size(), "?"));
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT id, item FROM log WHERE item IS NOT NULL AND id IN (" + placeholders + ")")) {
+                for (int i = 0; i < chunk.size(); i++) {
+                    ps.setLong(i + 1, chunk.get(i));
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        items.put(rs.getLong(1), rs.getString(2));
+                    }
+                }
+            }
+        }
+        return items;
     }
 
     /** Löscht höchstens {@code limit} Einträge, die älter als {@code cutoffMillis} sind, und liefert deren Anzahl. */
@@ -258,7 +290,7 @@ public final class LogDatabase implements AutoCloseable {
                 action,
                 rs.getString("material"),
                 rs.getInt("amount"),
-                rs.getString("item"));
+                null);
     }
 
     private static void setNullableString(PreparedStatement ps, int index, String value) throws SQLException {

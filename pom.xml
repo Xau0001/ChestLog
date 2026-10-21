@@ -6,13 +6,15 @@
 
     <groupId>onl.xau</groupId>
     <artifactId>chestlog</artifactId>
-    <version>1.0.0</version>
+    <!-- beim Release aus dem Tag gesetzt: mvn package -Drevision=1.2.3 -->
+    <version>${revision}</version>
     <packaging>jar</packaging>
 
     <name>ChestLog</name>
     <description>Protokolliert Truhen- und Container-Zugriffe auf Spigot-Servern.</description>
 
     <properties>
+        <revision>1.0.0</revision>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>

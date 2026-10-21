@@ -7,9 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -65,7 +69,8 @@ class LogDatabaseTest {
         assertEquals(LogAction.ADD, e.action());
         assertEquals("STONE", e.material());
         assertEquals(64, e.amount());
-        assertEquals("item: yaml", e.item());
+        assertNull(e.item(), "das Item-YAML wird nicht mit der Liste geladen");
+        assertEquals(Map.of(e.id(), "item: yaml"), db.loadItems(List.of(e.id())));
         assertEquals(1, result.totalCount());
         assertEquals(1_000, result.oldestTimestamp());
         assertFalse(result.truncated());
@@ -127,6 +132,62 @@ class LogDatabaseTest {
         assertEquals(2_500, result.totalCount());
         assertEquals(10_000, result.oldestTimestamp());
         assertTrue(result.truncated());
+    }
+
+    @Test
+    void itemsNachladen() throws SQLException {
+        db.insert(List.of(
+                new LogEntry(0, 1, LEFT, PLAYER, "Xau", LogAction.ADD, "STONE", 1, "a"),
+                new LogEntry(0, 2, LEFT, PLAYER, "Xau", LogAction.OPEN, "CHEST", 1, null),
+                new LogEntry(0, 3, LEFT, PLAYER, "Xau", LogAction.REMOVE, "DIRT", 1, "c")));
+        List<Long> ids = db.query(List.of(LEFT), 10).entries().stream().map(LogEntry::id).toList();
+
+        Map<Long, String> items = db.loadItems(ids);
+
+        assertEquals(2, items.size(), "Einträge ohne Item fehlen");
+        assertEquals("c", items.get(ids.get(0)));
+        assertEquals("a", items.get(ids.get(2)));
+        assertTrue(db.loadItems(List.of()).isEmpty());
+    }
+
+    @Test
+    void itemsNachladenInMehrerenAbfragen() throws SQLException {
+        List<LogEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 1_200; i++) {
+            entries.add(new LogEntry(0, i, LEFT, PLAYER, "Xau", LogAction.ADD, "STONE", 1, "item " + i));
+        }
+        db.insert(entries);
+        List<Long> ids = db.query(List.of(LEFT), 2_000).entries().stream().map(LogEntry::id).toList();
+
+        assertEquals(1_200, db.loadItems(ids).size());
+    }
+
+    @Test
+    void unlesbareZeilenVerfaelschenDieZaehlungNicht() throws SQLException {
+        List<LogEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            entries.add(entry(LEFT, 1_000 + i, LogAction.ADD, "STONE", 1));
+        }
+        db.insert(entries);
+        // eine Zeile mit unbekanntem Aktionscode, z. B. aus einer neueren Plugin-Version
+        try (Connection raw = DriverManager.getConnection("jdbc:sqlite:" + dir.resolve("chestlog.db"));
+             Statement st = raw.createStatement()) {
+            st.executeUpdate("INSERT INTO log (ts, world, x, y, z, action) VALUES (2000, '" + WORLD + "', 10, 64, 20, 99)");
+        }
+
+        QueryResult limited = db.query(List.of(LEFT), 11);
+        assertEquals(10, limited.entries().size());
+        assertFalse(limited.truncated(), "alle 11 Zeilen wurden gelesen");
+
+        QueryResult truncated = db.query(List.of(LEFT), 5);
+        assertEquals(4, truncated.entries().size());
+        assertTrue(truncated.truncated());
+        assertEquals(1_000, truncated.oldestTimestamp());
+
+        QueryResult all = db.query(List.of(LEFT), 100);
+        assertFalse(all.truncated());
+        assertEquals(10, all.totalCount());
+        assertEquals(1_000, all.oldestTimestamp());
     }
 
     @Test

@@ -1,7 +1,10 @@
 package onl.xau.chestlog.listener;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -23,6 +26,7 @@ import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BundleMeta;
 import org.bukkit.plugin.Plugin;
 
 import onl.xau.chestlog.LogService;
@@ -30,7 +34,6 @@ import onl.xau.chestlog.container.ContainerResolver;
 import onl.xau.chestlog.container.ContainerTarget;
 import onl.xau.chestlog.container.ItemKey;
 import onl.xau.chestlog.diff.InventoryDiff;
-import onl.xau.chestlog.model.BlockPos;
 
 /**
  * Logging von OPEN, ADD/REMOVE (Diff pro Klick), PLACE, BREAK und DROP.
@@ -50,6 +53,8 @@ public final class ContainerListener implements Listener {
 
     private record Pending(Player player, Inventory inventory, ContainerTarget target, Map<ItemKey, Integer> before) {
     }
+
+    private static final int MAX_BUNDLE_DEPTH = 4;
 
     private final Plugin plugin;
     private final LogService log;
@@ -122,20 +127,31 @@ public final class ContainerListener implements Listener {
         if (target == null) {
             return;
         }
+        // Klicks aus diesem Tick jetzt auswerten, solange der Inhalt noch im Container liegt. Nach dem Abbau wäre er
+        // herausgefallen und würde sonst dem Klickenden als entnommen zugerechnet.
+        completePendingAt(target);
         Map<ItemKey, Integer> drops = Map.of();
         BlockState state = block.getState();
         // Shulkerkisten behalten ihren Inhalt im Item, da fällt nichts heraus.
         if (state instanceof Container container && !(state instanceof ShulkerBox)) {
-            drops = snapshot(container.getSnapshotInventory());
+            drops = InventoryDiff.count(container.getSnapshotInventory().getContents(), ItemKey::of,
+                    ItemStack::getAmount);
         }
-        BlockPos broken = new BlockPos(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ());
-        log.logBreak(event.getPlayer(), target, broken, drops);
+        log.logBreak(event.getPlayer(), target, ContainerResolver.pos(block), drops);
     }
 
     /** Wertet alle geplanten Vergleiche sofort aus, z. B. beim Deaktivieren des Plugins. */
     public void completeAll() {
         for (PendingKey key : new ArrayList<>(pending.keySet())) {
             complete(key);
+        }
+    }
+
+    private void completePendingAt(ContainerTarget target) {
+        for (Map.Entry<PendingKey, Pending> entry : new ArrayList<>(pending.entrySet())) {
+            if (!Collections.disjoint(entry.getValue().target().positions(), target.positions())) {
+                complete(entry.getKey());
+            }
         }
     }
 
@@ -172,13 +188,47 @@ public final class ContainerListener implements Listener {
             return;
         }
         Map<ItemKey, Integer> diff = InventoryDiff.diff(p.before(), snapshot(p.inventory()));
-        // Wurde der Container im selben Tick abgebaut, ist der Inhalt herausgefallen und nicht entnommen.
+        // Fehlt ein Teil des Containers (z. B. durch eine Explosion), ist der Inhalt herausgefallen, nicht entnommen.
         if (!diff.isEmpty() && resolver.isStillPresent(p.target())) {
             log.logChanges(p.player(), p.target(), diff);
         }
     }
 
-    private static Map<ItemKey, Integer> snapshot(Inventory inventory) {
-        return InventoryDiff.count(inventory.getContents(), ItemKey::of, ItemStack::getAmount);
+    /**
+     * Mengen pro Item-Art im Inventar. Bündel zählen mit ihrem Inhalt: das Bündel selbst als leeres Bündel, die Items
+     * darin einzeln. Sonst würde Herausnehmen aus einem Bündel im Container nur als „Bündel getauscht“ erscheinen.
+     */
+    static Map<ItemKey, Integer> snapshot(Inventory inventory) {
+        Map<ItemKey, Integer> counts = new LinkedHashMap<>();
+        for (ItemStack stack : inventory.getContents()) {
+            count(counts, stack, 0);
+        }
+        return counts;
+    }
+
+    private static void count(Map<ItemKey, Integer> counts, ItemStack stack, int depth) {
+        if (stack == null || stack.getType().isAir() || stack.getAmount() <= 0) {
+            return;
+        }
+        // Materialname zuerst prüfen: getItemMeta() legt jedes Mal eine Kopie an.
+        if (depth < MAX_BUNDLE_DEPTH && stack.getType().name().endsWith("BUNDLE")
+                && stack.getItemMeta() instanceof BundleMeta bundle && bundle.hasItems()) {
+            List<ItemStack> contents = bundle.getItems();
+            ItemStack empty = stack.clone();
+            BundleMeta emptyMeta = (BundleMeta) empty.getItemMeta();
+            emptyMeta.setItems(null);
+            empty.setItemMeta(emptyMeta);
+            counts.merge(ItemKey.of(empty), stack.getAmount(), Integer::sum);
+            for (int i = 0; i < stack.getAmount(); i++) {
+                for (ItemStack inner : contents) {
+                    count(counts, inner, depth + 1);
+                }
+            }
+            return;
+        }
+        ItemKey key = ItemKey.of(stack);
+        if (key != null) {
+            counts.merge(key, stack.getAmount(), Integer::sum);
+        }
     }
 }

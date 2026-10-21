@@ -1,5 +1,6 @@
 package onl.xau.chestlog;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -80,7 +81,7 @@ public final class LogService {
         for (Map.Entry<ItemKey, Integer> drop : drops.entrySet()) {
             ItemKey key = drop.getKey();
             writer.submit(new LogEntry(0, now, pos, player.getUniqueId(), player.getName(),
-                    LogAction.DROP, key.material().name(), drop.getValue(), ItemCodec.encode(key.stack())));
+                    LogAction.DROP, key.material().name(), drop.getValue(), ItemCodec.encodeForLog(key.stack())));
         }
         writer.submit(new LogEntry(0, now, pos, player.getUniqueId(), player.getName(),
                 LogAction.BREAK, target.material().name(), 1, null));
@@ -99,6 +100,11 @@ public final class LogService {
         return writer.query(target.positions(), settings.get().maxGuiEntries());
     }
 
+    /** Lädt asynchron das Item-YAML zu den IDs. Darf von jedem Thread aufgerufen werden. */
+    public CompletableFuture<Map<Long, String>> loadItems(Collection<Long> ids) {
+        return writer.loadItems(ids);
+    }
+
     public CompletableFuture<Integer> deleteOlderThan(long cutoffMillis) {
         return writer.deleteOlderThan(cutoffMillis);
     }
@@ -114,7 +120,7 @@ public final class LogService {
     private void write(EntryMerger.Merged<ItemKey> merged) {
         ItemKey key = merged.item();
         writer.submit(new LogEntry(0, merged.timestamp(), merged.pos(), merged.player(), merged.playerName(),
-                merged.action(), key.material().name(), merged.amount(), ItemCodec.encode(key.stack())));
+                merged.action(), key.material().name(), merged.amount(), ItemCodec.encodeForLog(key.stack())));
     }
 
     private static long windowMillis(PluginConfig config) {

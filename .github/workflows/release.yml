@@ -23,7 +23,8 @@ jobs:
           cache: maven
 
       - name: Bauen und testen
-        run: mvn -B -ntp verify
+        # Version aus dem Tag (v1.2.3 -> 1.2.3), damit JAR-Name und plugin.yml zum Release passen
+        run: mvn -B -ntp verify -Drevision="${GITHUB_REF_NAME#v}"
 
       - name: Release anlegen
         env:

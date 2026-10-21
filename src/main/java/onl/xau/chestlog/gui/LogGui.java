@@ -4,12 +4,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
-import java.util.function.Supplier;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import org.bukkit.ChatColor;
@@ -24,14 +23,14 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.plugin.IllegalPluginAccessException;
-import org.bukkit.plugin.Plugin;
 
+import onl.xau.chestlog.ChestLogPlugin;
 import onl.xau.chestlog.LogService;
 import onl.xau.chestlog.Messages;
 import onl.xau.chestlog.PluginConfig;
+import onl.xau.chestlog.admin.AdminStore;
+import onl.xau.chestlog.container.ContainerResolver;
 import onl.xau.chestlog.container.ContainerTarget;
-import onl.xau.chestlog.container.ItemCodec;
 import onl.xau.chestlog.model.BlockPos;
 import onl.xau.chestlog.model.LogEntry;
 import onl.xau.chestlog.storage.QueryResult;
@@ -40,11 +39,16 @@ import onl.xau.chestlog.util.TimeFormat;
 /**
  * Das scrollbare Log-Fenster: Truheninventar mit 6 Zeilen, oben 5 Zeilen Einträge (neueste zuerst), unten Buttons.
  * Aus dem Fenster kommt kein Item heraus und keins hinein.
+ *
+ * <p>Die Einträge werden in einer Abfrage geladen, das Item-YAML aber nur für die sichtbare und die nächste Seite.
+ * So bleibt der Speicher klein, auch wenn ein Container 2000 Einträge mit großen Items hat.
  */
 public final class LogGui implements Listener {
 
     private static final int SIZE = 54;
     private static final int ENTRY_SLOTS = LogGuiHolder.ROWS * Scroller.COLUMNS;
+    // sichtbare Seite und die nächste, damit Scrollen um eine Zeile meist schon geladen ist
+    private static final int ITEM_WINDOW = 2 * ENTRY_SLOTS;
     private static final int SLOT_PAGE_UP = 45;
     private static final int SLOT_ROW_UP = 46;
     private static final int SLOT_FILTER = 48;
@@ -54,19 +58,20 @@ public final class LogGui implements Listener {
     private static final int SLOT_PAGE_DOWN = 53;
     private static final int SLOT_EMPTY_NOTICE = 22;
 
-    private final Plugin plugin;
+    private record Loaded(QueryResult result, Map<Long, String> items) {
+    }
+
+    private final ChestLogPlugin plugin;
     private final LogService log;
-    private final Supplier<PluginConfig> settings;
-    private final Logger logger;
+    private final AdminStore admins;
     private final Set<UUID> loading = new HashSet<>();
     // Alle Log-Fenster, die noch existieren. Schwach referenziert, verschwinden also mit dem Fenster.
     private final Set<Inventory> windows = Collections.newSetFromMap(new WeakHashMap<>());
 
-    public LogGui(Plugin plugin, LogService log, Supplier<PluginConfig> settings, Logger logger) {
+    public LogGui(ChestLogPlugin plugin, LogService log, AdminStore admins) {
         this.plugin = plugin;
         this.log = log;
-        this.settings = settings;
-        this.logger = logger;
+        this.admins = admins;
     }
 
     /** Lädt die Einträge asynchron und öffnet danach das Fenster auf dem Main-Thread. */
@@ -75,28 +80,39 @@ public final class LogGui implements Listener {
         if (!loading.add(id)) {
             return; // es lädt schon
         }
-        String coordinates = clicked.getX() + " " + clicked.getY() + " " + clicked.getZ();
-        log.query(target).whenComplete((result, error) -> runSync(() -> {
-            loading.remove(id);
-            if (!player.isOnline()) {
-                return;
-            }
-            if (error != null) {
-                logger.log(Level.SEVERE, "Log für " + target.worldName() + " " + coordinates
-                        + " konnte nicht geladen werden", error);
-                player.sendMessage(Messages.LOAD_FAILED);
-                return;
-            }
-            show(player, new LogGuiHolder(target, coordinates, result));
-        }));
+        String coordinates = ContainerResolver.pos(clicked).coordinates();
+        log.query(target)
+                .thenCompose(result -> log.loadItems(itemIds(firstWindow(result)))
+                        .thenApply(items -> new Loaded(result, items)))
+                .whenComplete((loaded, error) -> plugin.runSync(() -> {
+                    loading.remove(id);
+                    // inzwischen offline oder nicht mehr berechtigt
+                    if (!player.isOnline() || !admins.isAdmin(id)) {
+                        return;
+                    }
+                    if (error != null) {
+                        plugin.getLogger().log(Level.SEVERE, "Log für " + target.worldName() + " " + coordinates
+                                + " konnte nicht geladen werden", error);
+                        player.sendMessage(Messages.LOAD_FAILED);
+                        return;
+                    }
+                    LogGuiHolder holder = new LogGuiHolder(target, coordinates, loaded.result());
+                    storeItems(holder, firstWindow(loaded.result()), loaded.items());
+                    show(player, holder);
+                }));
     }
 
     /** Schließt alle offenen Log-Fenster, z. B. beim Deaktivieren des Plugins. */
     public void closeAll() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (windows.contains(player.getOpenInventory().getTopInventory())) {
-                player.closeInventory();
-            }
+            close(player);
+        }
+    }
+
+    /** Schließt das Log-Fenster des Spielers, falls eins offen ist, z. B. wenn er nicht mehr berechtigt ist. */
+    public void close(Player player) {
+        if (windows.contains(player.getOpenInventory().getTopInventory())) {
+            player.closeInventory();
         }
     }
 
@@ -124,7 +140,7 @@ public final class LogGui implements Listener {
             }
             case SLOT_CLOSE -> {
                 // closeInventory() ist im Klick-Event nicht erlaubt, daher einen Tick später
-                runSync(player::closeInventory);
+                plugin.runSync(player::closeInventory);
                 yield false;
             }
             default -> false;
@@ -171,7 +187,7 @@ public final class LogGui implements Listener {
     }
 
     private void render(LogGuiHolder holder) {
-        PluginConfig config = settings.get();
+        PluginConfig config = plugin.settings();
         long now = System.currentTimeMillis();
         List<LogEntry> visible = holder.visible();
         Scroller scroller = holder.scroller();
@@ -180,7 +196,8 @@ public final class LogGui implements Listener {
         for (int i = 0; i < ENTRY_SLOTS; i++) {
             int index = scroller.offset() + i;
             if (index < visible.size()) {
-                contents[i] = EntryIcons.icon(holder.iconCache(), visible.get(index), now, config.timezone());
+                LogEntry entry = visible.get(index);
+                contents[i] = EntryIcons.icon(entry, holder.item(entry), now, config.timezone());
             }
         }
         if (visible.isEmpty()) {
@@ -207,6 +224,51 @@ public final class LogGui implements Listener {
         contents[SLOT_CLOSE] = named(Material.BARRIER, ChatColor.RED + "Schließen");
 
         holder.getInventory().setContents(contents);
+        loadMissingItems(holder);
+    }
+
+    /** Lädt das Item-YAML für die sichtbare und die nächste Seite nach und zeichnet danach neu. */
+    private void loadMissingItems(LogGuiHolder holder) {
+        int offset = holder.scroller().offset();
+        List<LogEntry> missing = holder.missingItems(offset, offset + ITEM_WINDOW);
+        if (missing.isEmpty()) {
+            return;
+        }
+        holder.markLoading(missing);
+        log.loadItems(itemIds(missing)).whenComplete((items, error) -> plugin.runSync(() -> {
+            if (error != null) {
+                plugin.getLogger().log(Level.SEVERE, "Items für das Log-Fenster konnten nicht geladen werden", error);
+            }
+            // auch bei einem Fehler eintragen (dann als Material), sonst würde es endlos neu versucht
+            storeItems(holder, missing, items == null ? Map.of() : items);
+            holder.unmarkLoading(missing);
+            if (!holder.getInventory().getViewers().isEmpty()) {
+                render(holder);
+            }
+        }));
+    }
+
+    private static void storeItems(LogGuiHolder holder, List<LogEntry> entries, Map<Long, String> items) {
+        for (LogEntry entry : entries) {
+            if (LogGuiHolder.hasItem(entry)) {
+                holder.putItem(entry, EntryIcons.decode(entry, items.get(entry.id())));
+            }
+        }
+    }
+
+    // Die Einträge, die beim Öffnen sichtbar sind, und die nächste Seite.
+    private static List<LogEntry> firstWindow(QueryResult result) {
+        return result.entries().subList(0, Math.min(ITEM_WINDOW, result.entries().size()));
+    }
+
+    private static List<Long> itemIds(List<LogEntry> entries) {
+        List<Long> ids = new ArrayList<>();
+        for (LogEntry entry : entries) {
+            if (LogGuiHolder.hasItem(entry)) {
+                ids.add(entry.id());
+            }
+        }
+        return ids;
     }
 
     private static ItemStack filterButton(LogFilter current) {
@@ -263,29 +325,5 @@ public final class LogGui implements Listener {
             stack.setItemMeta(meta);
         }
         return stack;
-    }
-
-    private void runSync(Runnable task) {
-        if (!plugin.isEnabled()) {
-            return;
-        }
-        try {
-            plugin.getServer().getScheduler().runTask(plugin, task);
-        } catch (IllegalPluginAccessException e) {
-            // Plugin wird gerade deaktiviert
-        }
-    }
-
-    /** Für {@link EntryIcons}: Item aus der Datenbank, ersatzweise Material, sonst Barriere mit Materialname. */
-    static ItemStack baseItem(LogEntry entry) {
-        ItemStack decoded = ItemCodec.decode(entry.item());
-        if (decoded != null) {
-            return decoded;
-        }
-        Material material = entry.material() == null ? null : Material.matchMaterial(entry.material());
-        if (material != null && material.isItem() && !material.isAir()) {
-            return new ItemStack(material);
-        }
-        return named(Material.BARRIER, ChatColor.RED + (entry.material() == null ? "Unbekannt" : entry.material()));
     }
 }

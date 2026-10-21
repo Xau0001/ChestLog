@@ -77,6 +77,8 @@ Darunter folgen Spieler, Zeit (`20.10.2026 18:46:12`, Zeitzone aus der Config) u
 
 Aus dem Fenster lässt sich nichts herausnehmen und nichts hineinlegen (Klick, Shift-Klick, Zahlentasten, Doppelklick, Drag, Q).
 
+Die Einträge werden beim Öffnen auf einmal geladen, die Item-Daten aber nur für die sichtbare und die nächste Seite. Weiter hinten stehen kurz Platzhalter mit „lädt …“, bis die Items da sind. So bleibt der Speicherbedarf klein, auch bei 2000 Einträgen mit großen Items.
+
 Bei Doppeltruhen zeigt das Fenster immer die Einträge **beider Hälften**, auch alte Einträge aus der Zeit, als es noch eine Einzeltruhe war. Wird eine Hälfte abgebaut, ziehen ihre Einträge auf die stehengebliebene Hälfte um. Die gemeinsame Historie, der Abbau und die herausgefallenen Items bleiben so an der übrigen Truhe sichtbar.
 
 ## Befehle
@@ -85,16 +87,16 @@ Bei Doppeltruhen zeigt das Fenster immer die Einträge **beider Hälften**, auch
 
 | Befehl | Wirkung |
 |---|---|
-| `/chestlog add <Spieler>` | Spieler zur Liste der Berechtigten hinzufügen |
-| `/chestlog remove <Spieler>` | Spieler entfernen |
+| `/chestlog add <Spieler oder UUID>` | Spieler zur Liste der Berechtigten hinzufügen |
+| `/chestlog remove <Spieler oder UUID>` | Spieler entfernen |
 | `/chestlog list` | alle Berechtigten mit Namen, wer sie hinzugefügt hat und wann |
 | `/chestlog tool` | gibt das Werkzeug (Holzspitzhacke) |
 | `/chestlog reload` | `config.yml` und `admins.yml` neu laden |
 | `/chestlog help` | Übersicht |
 
 - Erlaubt für die **Konsole** (auch RCON) und für Spieler aus `admins.yml`. Alle anderen bekommen „Dazu hast du keine Berechtigung.“ und keine Tab-Vervollständigung.
-- `add`: Der Spieler muss online sein oder schon einmal auf dem Server gewesen sein. Gesucht wird ohne Groß-/Kleinschreibung unter den bekannten Spielern des Servers, ohne Anfrage bei Mojang. Sonst: „Spieler war noch nie auf dem Server“.
-- `remove`: Den letzten Eintrag kann nur die Konsole entfernen, damit sich niemand aussperrt. Statt des Namens geht auch die UUID.
+- `add`: Der Spieler muss online sein oder schon einmal auf dem Server gewesen sein. Gesucht wird ohne Groß-/Kleinschreibung unter den bekannten Spielern des Servers, ohne Anfrage bei Mojang. Sonst: „Spieler war noch nie auf dem Server“. Trugen mehrere bekannte Accounts den Namen (z. B. nach einer Namensänderung), wird niemand eingetragen. Stattdessen listet der Befehl die UUIDs auf, und man fügt mit `add <UUID>` den richtigen hinzu.
+- `remove`: Den letzten Eintrag kann nur die Konsole entfernen, damit sich niemand aussperrt. Ein offenes Log-Fenster des Entfernten wird geschlossen, ebenso nach `reload`, wenn jemand nicht mehr in der Datei steht.
 - Tab-Vervollständigung: Unterbefehle, bei `add` Online-Spieler, bei `remove` Spieler aus der Liste.
 
 Es gibt **keine Bukkit-Permissions**. Wer berechtigt ist, steht ausschließlich in `admins.yml`.
@@ -157,13 +159,18 @@ Erfasst werden alle Blöcke, deren BlockState ein Container ist: Truhe, Fallentr
 
 **So werden Hineinlegen und Entnehmen erkannt:** Bei jedem Klick und jedem Drag in einem Container-Fenster (auch im eigenen Inventar unten, denn Shift-Klick verschiebt nach oben) merkt sich das Plugin den Inhalt des Containers und vergleicht ihn einen Tick später mit dem neuen Stand. Die Differenz pro Item-Art (inklusive Name, Verzauberungen und anderer Komponenten) ergibt die Einträge. Dadurch funktionieren alle Klickarten gleich zuverlässig: normaler Klick, Rechtsklick, Shift-Klick, Zahlentasten, Doppelklick zum Einsammeln, Drag, Bündel. Umsortieren innerhalb des Containers erzeugt keinen Eintrag.
 
+**Bündel im Container** zählen mit ihrem Inhalt: das Bündel selbst als leeres Bündel, die Items darin einzeln. Nimmt jemand Items aus einem Bündel, das in der Truhe liegt, steht also „−3 Diamant entnommen“ im Log statt „Bündel getauscht“.
+
+Wird ein Container abgebaut, werden Klicks aus demselben Tick noch vor dem Abbau ausgewertet. So erscheint der herausfallende Inhalt nicht fälschlich als Entnahme eines anderen Spielers.
+
 ## Datenhaltung
 
 - SQLite-Datei `plugins/ChestLog/chestlog.db` im WAL-Modus (daneben liegen zur Laufzeit `chestlog.db-wal` und `chestlog.db-shm`).
 - Geschrieben wird über eine Queue auf einem eigenen Thread, gebündelt etwa jede Sekunde oder ab 100 Einträgen. Beim Stoppen des Servers wird alles geschrieben, auch noch offene Zusammenfassungen.
 - Alte Einträge (`retention-days`) werden in Blöcken zu 10.000 gelöscht, dazwischen laufen Schreiben und Abfragen weiter. Eine Inspektion muss so auch bei einem großen Löschlauf nicht warten.
-- Abfragen laufen asynchron, das Fenster öffnet sich danach auf dem Main-Thread. Der Main-Thread macht keine blockierende Datei- oder Datenbank-I/O (Ausnahme: das einmalige Einlesen der Dateien beim Start).
-- Die Items werden als YAML gespeichert. Lässt sich ein gespeichertes Item später nicht mehr lesen (z. B. nach einem Versionswechsel), zeigt das Fenster stattdessen das Material mit der Menge, und wenn auch das nicht geht, eine Barriere mit dem Materialnamen.
+- Abfragen laufen asynchron, das Fenster öffnet sich danach auf dem Main-Thread. Der Main-Thread macht im laufenden Betrieb keine blockierende Datei- oder Datenbank-I/O (Ausnahme: das einmalige Einlesen der Dateien beim Start, siehe [Abweichungen](#abweichungen)).
+- Die Items werden als YAML gespeichert, höchstens 64 KB pro Eintrag. Größere Items (z. B. eine Shulkerkiste voller beschriebener Bücher) werden nur mit Material und Menge gespeichert und im Fenster mit „Item-Daten zu groß, nicht gespeichert“ markiert. Sonst könnte jemand mit solchen Items die Datenbank aufblähen. Eine Shulkerkiste voller verzauberter Ausrüstung bleibt deutlich darunter.
+- Lässt sich ein gespeichertes Item später nicht mehr lesen (z. B. nach einem Versionswechsel), zeigt das Fenster stattdessen das Material mit der Menge, und wenn auch das nicht geht, eine Barriere mit dem Materialnamen.
 - **Backup:** Bei gestopptem Server `chestlog.db` (und falls vorhanden `-wal`/`-shm`) zusammen mit `admins.yml` und `config.yml` kopieren.
 
 ## Bekannte Grenzen
@@ -173,7 +180,6 @@ Erfasst werden alle Blöcke, deren BlockState ein Container ist: Truhe, Fallentr
 - Beim Abbau einer **Shulkerkiste** gibt es keine „herausgefallen“-Einträge, weil der Inhalt in der Shulkerkiste bleibt. Der Abbau selbst wird geloggt.
 - Wird ein Container inspiziert, werden seine noch offenen Zusammenfassungen sofort gespeichert, damit sie im Fenster erscheinen. Legt derselbe Spieler danach innerhalb des Zeitfensters weiter dasselbe hinein, entsteht ein zweiter Eintrag.
 - Der Fenster-Inhalt ist ein Schnappschuss beim Öffnen. Neue Ereignisse erscheinen erst beim nächsten Inspizieren.
-- Platziert man eine Truhe neben eine vorhandene (es entsteht eine Doppeltruhe), kann der „platziert“-Eintrag an der neuen Hälfte statt an der kanonischen gespeichert werden. Da immer beide Hälften abgefragt werden, ist er trotzdem sichtbar.
 - Der Befehl `/chestlog` erscheint wegen der fehlenden Bukkit-Permission in der Befehlsliste aller Spieler, ausführen können ihn aber nur Berechtigte.
 
 ## Nicht Teil von Version 1
@@ -212,7 +218,7 @@ Die Abhängigkeit `org.spigotmc:spigot-api` (Scope `provided`) kommt aus `https:
 | `server-test.yml` | bei Änderungen am Code, manuell | baut Spigot 26.3 mit BuildTools (zwischengespeichert), startet einen Testserver mit dem Plugin, führt Konsolenbefehle aus und prüft das Log auf Fehler und Warnungen von ChestLog. Der Testserver akzeptiert dafür die [Mojang-EULA](https://aka.ms/MinecraftEULA). |
 | `release.yml` | bei einem Tag `v*` | baut die JAR und hängt sie an ein GitHub-Release |
 
-Ein Release: `git tag v1.0.0 && git push origin v1.0.0`.
+Ein Release: `git tag v1.0.0 && git push origin v1.0.0`. Die Version im JAR-Namen und in der `plugin.yml` kommt aus dem Tag (`-Drevision=1.0.0`), ohne Tag gilt `revision` aus der `pom.xml`.
 
 Paketstruktur unter `onl.xau.chestlog`:
 
@@ -240,7 +246,11 @@ Punkte, an denen die Umsetzung von den Vorgaben abweicht oder die beim Schreiben
 
   `server-test.yml` zeigt an, ob der Treiber im Server-JAR enthalten ist.
 - **`admins.yml` wird mit SnakeYAML geschrieben** (das Spigot mitbringt) statt mit Bukkits `YamlConfiguration`, damit die Tests ohne Bukkit laufen. Das Format ist das vorgegebene; Datumswerte stehen in einfachen statt doppelten Anführungszeichen, beides ist gültiges YAML.
-- **Suche bei `add` asynchron:** `Bukkit.getOfflinePlayers()` liest Spielerdateien von der Platte und läuft deshalb nicht auf dem Main-Thread.
+- **Suche bei `add`:** `Bukkit.getOfflinePlayers()` läuft auf dem Main-Thread, weil es die Spielerliste des Servers liest; es listet dabei nur das Spielerdaten-Verzeichnis. Die Namen lesen manche Server-Versionen erst aus den einzelnen Spielerdateien, deshalb geschieht der Namensvergleich asynchron. Zusätzlich akzeptieren `add` und `remove` eine UUID, und mehrdeutige Namen werden nicht geraten.
+- **Items im Fenster:** Die Vorgabe lädt die Einträge in einer Abfrage und hält sie im Holder. Das geschieht weiterhin, nur das Item-YAML wird pro Seite nachgeladen. Sonst könnten 2000 Einträge mit großen Items beim Inspizieren viel Speicher belegen.
+- **Größenlimit für Items:** siehe [Datenhaltung](#datenhaltung), 64 KB pro Eintrag.
+- **Bündel:** werden im Diff mit ihrem Inhalt gezählt, siehe [Was geloggt wird](#was-geloggt-wird).
+- **Datei-I/O beim Start:** `config.yml`, `admins.yml` und das Öffnen der Datenbank laufen einmalig in `onEnable` auf dem Main-Thread, wie bei Bukkit-Plugins üblich. Im laufenden Betrieb (Logging, Inspizieren, Befehle, `reload`) gibt es keine blockierende I/O auf dem Main-Thread.
 - **Buttons:** Pfeil (Zeile) und Spektralpfeil (Seite) mit den Beschriftungen „▲ Eine Zeile hoch“ bzw. „▲▲ Eine Seite hoch“; die Zeichen ⏫/⏬ fehlen in manchen Schriftarten.
 - **Filter „nur Entnahmen“** zeigt auch „beim Abbau herausgefallen“, weil diese Items den Container ebenfalls verlassen haben.
 - **Abbau einer Doppeltruhen-Hälfte:** Die Vorgabe speichert unter der kanonischen Hälfte und fragt beide Hälften ab. Nach dem Abbau einer Hälfte wäre die gemeinsame Historie von der übrigen Truhe aus nicht mehr zu sehen, ein Dieb könnte so seine Spuren verwischen. Deshalb werden in diesem Fall „abgebaut“ und „herausgefallen“ an der stehengebliebenen Hälfte gespeichert, und alle Einträge der abgebauten Position ziehen dorthin um.

@@ -12,12 +12,14 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 import org.bukkit.command.PluginCommand;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -72,7 +74,7 @@ public final class ChestLogPlugin extends JavaPlugin {
         logService = new LogService(writer, this::settings, getLogger());
 
         ContainerResolver resolver = new ContainerResolver(this::settings);
-        gui = new LogGui(this, logService, this::settings, getLogger());
+        gui = new LogGui(this, logService, admins);
         containerListener = new ContainerListener(this, logService, resolver);
 
         PluginManager plugins = getServer().getPluginManager();
@@ -125,6 +127,14 @@ public final class ChestLogPlugin extends JavaPlugin {
         return settings;
     }
 
+    /** Schließt ein offenes Log-Fenster des Spielers, z. B. nachdem er aus der Liste entfernt wurde. */
+    public void closeLogWindow(UUID player) {
+        Player online = getServer().getPlayer(player);
+        if (online != null && gui != null) {
+            gui.close(online);
+        }
+    }
+
     /** Führt die Aufgabe im nächsten Tick auf dem Main-Thread aus, sofern das Plugin noch läuft. */
     public void runSync(Runnable task) {
         if (!isEnabled()) {
@@ -142,34 +152,59 @@ public final class ChestLogPlugin extends JavaPlugin {
      * Fehler bleibt der bisherige Stand erhalten.
      */
     public CompletableFuture<Void> reloadAsync() {
-        Path configFile = getDataFolder().toPath().resolve("config.yml");
         CompletableFuture<Void> result = new CompletableFuture<>();
-        fileExecutor.execute(() -> {
-            YamlConfiguration yaml = new YamlConfiguration();
-            Map<UUID, Admin> loaded;
-            try {
-                if (Files.exists(configFile)) {
-                    yaml.load(configFile.toFile());
-                }
-            } catch (IOException | InvalidConfigurationException e) {
-                result.completeExceptionally(new IllegalStateException("config.yml: " + e.getMessage(), e));
-                return;
-            }
-            try {
-                loaded = AdminStore.read(admins.file());
-            } catch (IOException | IllegalArgumentException e) {
-                result.completeExceptionally(new IllegalStateException("admins.yml: " + e.getMessage(), e));
-                return;
-            }
-            runSync(() -> {
-                PluginConfig config = PluginConfig.from(yaml, getLogger());
-                settings = config;
-                logService.applySettings(config);
-                admins.replaceAll(loaded);
-                result.complete(null);
-            });
-        });
+        reload(result, 0);
         return result;
+    }
+
+    private void reload(CompletableFuture<Void> result, int attempt) {
+        Path configFile = getDataFolder().toPath().resolve("config.yml");
+        int adminVersion = admins.version();
+        try {
+            fileExecutor.execute(() -> {
+                YamlConfiguration yaml = new YamlConfiguration();
+                Map<UUID, Admin> loaded;
+                try {
+                    if (Files.exists(configFile)) {
+                        yaml.load(configFile.toFile());
+                    }
+                } catch (IOException | InvalidConfigurationException e) {
+                    result.completeExceptionally(new IllegalStateException("config.yml: " + e.getMessage(), e));
+                    return;
+                }
+                try {
+                    loaded = AdminStore.read(admins.file());
+                } catch (IOException | IllegalArgumentException e) {
+                    result.completeExceptionally(new IllegalStateException("admins.yml: " + e.getMessage(), e));
+                    return;
+                }
+                runSync(() -> {
+                    // Wurde die Liste zwischen Lesen und Übernehmen geändert (add, remove, Namens-Update beim Join),
+                    // wäre das Gelesene veraltet. Dann nochmal lesen; das Speichern der Änderung läuft vorher.
+                    if (admins.version() != adminVersion) {
+                        if (attempt < 3) {
+                            reload(result, attempt + 1);
+                        } else {
+                            result.completeExceptionally(new IllegalStateException(
+                                    "admins.yml wird gerade geändert, bitte gleich nochmal versuchen"));
+                        }
+                        return;
+                    }
+                    PluginConfig config = PluginConfig.from(yaml, getLogger());
+                    settings = config;
+                    logService.applySettings(config);
+                    admins.replaceAll(loaded);
+                    for (Player player : getServer().getOnlinePlayers()) {
+                        if (!admins.isAdmin(player.getUniqueId())) {
+                            gui.close(player);
+                        }
+                    }
+                    result.complete(null);
+                });
+            });
+        } catch (RejectedExecutionException e) {
+            result.completeExceptionally(e);
+        }
     }
 
     private YamlConfiguration readConfigAtStartup(Path file) {

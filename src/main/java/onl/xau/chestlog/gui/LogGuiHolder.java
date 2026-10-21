@@ -1,14 +1,18 @@
 package onl.xau.chestlog.gui;
 
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 
 import onl.xau.chestlog.container.ContainerTarget;
+import onl.xau.chestlog.model.LogAction;
 import onl.xau.chestlog.model.LogEntry;
 import onl.xau.chestlog.storage.QueryResult;
 
@@ -16,13 +20,20 @@ import onl.xau.chestlog.storage.QueryResult;
 public final class LogGuiHolder implements InventoryHolder {
 
     static final int ROWS = 5;
+    // Dekodierte Items, höchstens so viele: hält den Speicher klein, auch wenn jemand durch alle Seiten blättert.
+    private static final int MAX_CACHED_ITEMS = 6 * ROWS * Scroller.COLUMNS;
 
     private final ContainerTarget target;
     private final String coordinates;
     private final QueryResult result;
     private final Scroller scroller;
-    // dekodierte Item-Icons nach Eintrags-ID, damit beim Scrollen nicht jedes Mal YAML gelesen wird
-    private final Map<Long, ItemStack> iconCache = new HashMap<>();
+    private final Map<Long, ItemStack> items = new LinkedHashMap<>(64, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, ItemStack> eldest) {
+            return size() > MAX_CACHED_ITEMS;
+        }
+    };
+    private final Set<Long> loading = new HashSet<>();
     private Inventory inventory;
     private LogFilter filter = LogFilter.ALL;
     private List<LogEntry> visible;
@@ -56,10 +67,6 @@ public final class LogGuiHolder implements InventoryHolder {
         return result;
     }
 
-    Map<Long, ItemStack> iconCache() {
-        return iconCache;
-    }
-
     LogFilter filter() {
         return filter;
     }
@@ -79,5 +86,40 @@ public final class LogGuiHolder implements InventoryHolder {
                 ? result.entries()
                 : result.entries().stream().filter(e -> filter.matches(e.action())).toList();
         scroller.reset(visible.size());
+    }
+
+    /** Das dekodierte Item eines Eintrags oder {@code null}, wenn es (noch) nicht geladen ist. */
+    ItemStack item(LogEntry entry) {
+        return items.get(entry.id());
+    }
+
+    void putItem(LogEntry entry, ItemStack stack) {
+        items.put(entry.id(), stack);
+    }
+
+    /** Einträge im Bereich {@code [from, to)} der Anzeige, deren Item weder geladen ist noch gerade lädt. */
+    List<LogEntry> missingItems(int from, int to) {
+        List<LogEntry> missing = new ArrayList<>();
+        for (int i = Math.max(0, from); i < Math.min(to, visible.size()); i++) {
+            LogEntry entry = visible.get(i);
+            if (hasItem(entry) && !items.containsKey(entry.id()) && !loading.contains(entry.id())) {
+                missing.add(entry);
+            }
+        }
+        return missing;
+    }
+
+    void markLoading(List<LogEntry> entries) {
+        entries.forEach(e -> loading.add(e.id()));
+    }
+
+    void unmarkLoading(List<LogEntry> entries) {
+        entries.forEach(e -> loading.remove(e.id()));
+    }
+
+    /** Einträge, deren Icon das Item selbst ist. */
+    static boolean hasItem(LogEntry entry) {
+        return entry.action() == LogAction.ADD || entry.action() == LogAction.REMOVE
+                || entry.action() == LogAction.DROP;
     }
 }

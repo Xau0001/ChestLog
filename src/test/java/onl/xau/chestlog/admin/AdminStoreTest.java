@@ -122,6 +122,19 @@ class AdminStoreTest {
     }
 
     @Test
+    void versionZaehltJedeAenderung() {
+        int start = store.version();
+        store.add(new Admin(XAU, "Xau", "CONSOLE", "x"));
+        store.add(new Admin(XAU, "Xau", "CONSOLE", "x")); // schon vorhanden, keine Änderung
+        store.updateName(XAU, "Xau2");
+        store.add(new Admin(BOB, "Bob", "CONSOLE", "y"));
+        store.remove(BOB, false);
+        store.replaceAll(Map.of());
+
+        assertEquals(start + 5, store.version());
+    }
+
+    @Test
     void listeIstNachNamenSortiert() {
         store.add(new Admin(XAU, "xau", "CONSOLE", "x"));
         store.add(new Admin(BOB, "Bob", "CONSOLE", "y"));

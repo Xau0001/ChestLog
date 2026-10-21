@@ -3,7 +3,9 @@ package onl.xau.chestlog.storage;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -78,6 +80,12 @@ public final class LogWriter implements AutoCloseable {
             flush();
             return database.query(positions, limit);
         });
+    }
+
+    /** Lädt asynchron das Item-YAML zu den IDs, siehe {@link LogDatabase#loadItems}. */
+    public CompletableFuture<Map<Long, String>> loadItems(Collection<Long> ids) {
+        List<Long> copy = List.copyOf(ids);
+        return supply(() -> database.loadItems(copy));
     }
 
     /** Verschiebt asynchron alle Einträge (auch die noch eingereihten) von {@code from} nach {@code to}. */
