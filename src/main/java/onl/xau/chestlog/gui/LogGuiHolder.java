@@ -1,6 +1,7 @@
 package onl.xau.chestlog.gui;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +35,9 @@ public final class LogGuiHolder implements InventoryHolder {
         }
     };
     private final Set<Long> loading = new HashSet<>();
+    // geladenes, noch nicht dekodiertes Item-YAML (Wert null = kein Item gespeichert)
+    private final Map<Long, String> raw = new HashMap<>();
+    private boolean renderScheduled;
     private Inventory inventory;
     private LogFilter filter = LogFilter.ALL;
     private List<LogEntry> visible;
@@ -97,12 +101,40 @@ public final class LogGuiHolder implements InventoryHolder {
         items.put(entry.id(), stack);
     }
 
+    /** {@code true}, wenn das YAML des Eintrags geladen ist, aber noch nicht dekodiert. */
+    boolean hasRaw(LogEntry entry) {
+        return raw.containsKey(entry.id());
+    }
+
+    void putRaw(LogEntry entry, String yaml) {
+        raw.put(entry.id(), yaml);
+    }
+
+    /** Das geladene YAML, danach wird es nicht mehr gehalten. */
+    String takeRaw(LogEntry entry) {
+        return raw.remove(entry.id());
+    }
+
+    /** Merkt ein Neuzeichnen vor; {@code false}, wenn schon eins vorgemerkt ist. */
+    boolean scheduleRender() {
+        if (renderScheduled) {
+            return false;
+        }
+        renderScheduled = true;
+        return true;
+    }
+
+    void renderDone() {
+        renderScheduled = false;
+    }
+
     /** Einträge im Bereich {@code [from, to)} der Anzeige, deren Item weder geladen ist noch gerade lädt. */
     List<LogEntry> missingItems(int from, int to) {
         List<LogEntry> missing = new ArrayList<>();
         for (int i = Math.max(0, from); i < Math.min(to, visible.size()); i++) {
             LogEntry entry = visible.get(i);
-            if (hasItem(entry) && !items.containsKey(entry.id()) && !loading.contains(entry.id())) {
+            long id = entry.id();
+            if (hasItem(entry) && !items.containsKey(id) && !raw.containsKey(id) && !loading.contains(id)) {
                 missing.add(entry);
             }
         }

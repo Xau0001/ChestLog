@@ -114,25 +114,34 @@ public final class ChestLogCommand implements TabExecutor {
                 return;
             }
         }
-        // Kein Mojang-Lookup: nur Spieler, die schon auf dem Server waren. getOfflinePlayers() listet dafür nur das
-        // Spielerdaten-Verzeichnis (Main-Thread, wegen der Spielerliste). Die Namen stehen teils erst in den
-        // Spielerdateien, deshalb werden sie asynchron gelesen.
-        OfflinePlayer[] candidates = uuid != null
-                ? new OfflinePlayer[] {plugin.getServer().getOfflinePlayer(uuid)}
-                : plugin.getServer().getOfflinePlayers();
+        // Kein Mojang-Lookup: nur Spieler, die schon auf dem Server waren. getOfflinePlayers() liest das
+        // Spielerdaten-Verzeichnis und teils die Spielerdateien, daher asynchron. Schlägt das fehl (die Bukkit-API ist
+        // dafür nicht ausdrücklich threadsicher), bekommt der Absender eine Meldung statt keiner Antwort.
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             Map<UUID, String> matches = new LinkedHashMap<>();
-            for (OfflinePlayer player : candidates) {
-                String playerName = player.getName();
-                boolean match = uuid != null
-                        ? player.isOnline() || player.hasPlayedBefore()
-                        : playerName != null && playerName.equalsIgnoreCase(input);
-                if (match) {
-                    matches.put(player.getUniqueId(), playerName);
+            RuntimeException failure = null;
+            try {
+                OfflinePlayer[] candidates = uuid != null
+                        ? new OfflinePlayer[] {plugin.getServer().getOfflinePlayer(uuid)}
+                        : plugin.getServer().getOfflinePlayers();
+                for (OfflinePlayer player : candidates) {
+                    String playerName = player.getName();
+                    boolean match = uuid != null
+                            ? player.isOnline() || player.hasPlayedBefore()
+                            : playerName != null && playerName.equalsIgnoreCase(input);
+                    if (match) {
+                        matches.put(player.getUniqueId(), playerName);
+                    }
                 }
+            } catch (RuntimeException e) {
+                failure = e;
             }
+            RuntimeException error = failure;
             plugin.runSync(() -> {
-                if (!isAllowed(sender)) {
+                if (error != null) {
+                    logger.log(Level.WARNING, "Spielersuche für /chestlog add fehlgeschlagen", error);
+                    sender.sendMessage(Messages.error("Die Spielersuche ist fehlgeschlagen, bitte nochmal versuchen."));
+                } else if (!isAllowed(sender)) {
                     sender.sendMessage(Messages.NO_PERMISSION); // inzwischen entfernt
                 } else if (matches.isEmpty()) {
                     sender.sendMessage(Messages.error("Spieler war noch nie auf dem Server: " + input));
@@ -143,8 +152,9 @@ public final class ChestLogCommand implements TabExecutor {
                     matches.keySet().forEach(id -> sender.sendMessage(ChatColor.DARK_GRAY + " - " + ChatColor.WHITE
                             + id));
                 } else {
+                    // Name kann fehlen (add per UUID); er wird beim nächsten Join eingetragen
                     Map.Entry<UUID, String> match = matches.entrySet().iterator().next();
-                    finishAdd(sender, match.getKey(), match.getValue() == null ? input : match.getValue());
+                    finishAdd(sender, match.getKey(), match.getValue());
                 }
             });
         });
@@ -154,12 +164,15 @@ public final class ChestLogCommand implements TabExecutor {
         String addedBy = isConsole(sender) ? CONSOLE : sender.getName();
         String addedAt = OffsetDateTime.now(plugin.settings().timezone()).truncatedTo(ChronoUnit.SECONDS)
                 .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-        if (!admins.add(new Admin(uuid, name, addedBy, addedAt))) {
-            sender.sendMessage(Messages.info(ChatColor.WHITE + name + ChatColor.GRAY + " ist schon berechtigt."));
+        Admin admin = new Admin(uuid, name, addedBy, addedAt);
+        if (!admins.add(admin)) {
+            sender.sendMessage(Messages.info(ChatColor.WHITE + displayName(admin) + ChatColor.GRAY
+                    + " ist schon berechtigt."));
             return;
         }
         save(sender);
-        sender.sendMessage(Messages.info(ChatColor.WHITE + name + ChatColor.GRAY + " ist jetzt berechtigt."));
+        sender.sendMessage(Messages.info(ChatColor.WHITE + displayName(admin) + ChatColor.GRAY
+                + " ist jetzt berechtigt."));
         Player player = plugin.getServer().getPlayer(uuid);
         if (player != null && player != sender) {
             player.sendMessage(Messages.info("Du kannst jetzt Container untersuchen: Rechtsklick mit dem Werkzeug, "

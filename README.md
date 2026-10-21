@@ -77,9 +77,9 @@ Darunter folgen Spieler, Zeit (`20.10.2026 18:46:12`, Zeitzone aus der Config) u
 
 Aus dem Fenster lässt sich nichts herausnehmen und nichts hineinlegen (Klick, Shift-Klick, Zahlentasten, Doppelklick, Drag, Q).
 
-Die Einträge werden beim Öffnen auf einmal geladen, die Item-Daten aber nur für die sichtbare und die nächste Seite. Weiter hinten stehen kurz Platzhalter mit „lädt …“, bis die Items da sind. So bleibt der Speicherbedarf klein, auch bei 2000 Einträgen mit großen Items.
+Die Einträge werden beim Öffnen auf einmal geladen, die Item-Daten aber nur für die sichtbare und die nächste Seite. Dekodiert werden sie mit einem festen Zeitbudget pro Tick. Bei sehr großen Items oder beim schnellen Blättern stehen deshalb kurz Platzhalter mit „lädt …“ im Fenster. So bleiben Speicherbedarf und Lag klein, auch bei 2000 Einträgen mit großen Items.
 
-Bei Doppeltruhen zeigt das Fenster immer die Einträge **beider Hälften**, auch alte Einträge aus der Zeit, als es noch eine Einzeltruhe war. Wird eine Hälfte abgebaut, ziehen ihre Einträge auf die stehengebliebene Hälfte um. Die gemeinsame Historie, der Abbau und die herausgefallenen Items bleiben so an der übrigen Truhe sichtbar.
+Bei Doppeltruhen zeigt das Fenster immer die Einträge **beider Hälften**, auch alte Einträge aus der Zeit, als es noch eine Einzeltruhe war. Wird eine Hälfte abgebaut, ziehen ihre Einträge bis zum Zeitpunkt des Abbaus auf die stehengebliebene Hälfte um. Die gemeinsame Historie, der Abbau und die herausgefallenen Items bleiben so an der übrigen Truhe sichtbar. Was danach an der Stelle passiert (z. B. ein neues Fass), bleibt dort.
 
 ## Befehle
 
@@ -140,7 +140,7 @@ disabled-worlds: []
 | `retention-days` | Einträge, die älter sind, werden beim Start und dann einmal täglich gelöscht. `0` = nie löschen |
 | `timezone` | Zeitzone für die Anzeige, z. B. `Europe/Berlin` oder `UTC` |
 | `protect-containers-with-tool` | Berechtigte können mit dem Werkzeug in der Hand keine Container abbauen |
-| `containers` | leer = alle Container; sonst z. B. `[CHEST, TRAPPED_CHEST, BARREL]` |
+| `containers` | leer = alle Container; sonst z. B. `[CHEST, TRAPPED_CHEST, BARREL]`. Bei einer Doppeltruhe genügt es, wenn eine Hälfte in der Liste steht (Kupfertruhen-Hälften können verschiedene Stufen haben). |
 | `disabled-worlds` | Weltnamen, in denen nichts geloggt wird |
 
 Ungültige Werte (unbekanntes Material, unbekannte Zeitzone, negative Zahlen) werden mit einer Warnung im Log durch den Standardwert ersetzt.
@@ -167,7 +167,7 @@ Wird ein Container abgebaut, werden Klicks aus demselben Tick noch vor dem Abbau
 
 - SQLite-Datei `plugins/ChestLog/chestlog.db` im WAL-Modus (daneben liegen zur Laufzeit `chestlog.db-wal` und `chestlog.db-shm`).
 - Geschrieben wird über eine Queue auf einem eigenen Thread, gebündelt etwa jede Sekunde oder ab 100 Einträgen. Beim Stoppen des Servers wird alles geschrieben, auch noch offene Zusammenfassungen.
-- Alte Einträge (`retention-days`) werden in Blöcken zu 10.000 gelöscht, dazwischen laufen Schreiben und Abfragen weiter. Eine Inspektion muss so auch bei einem großen Löschlauf nicht warten.
+- Alte Einträge (`retention-days`) werden in Blöcken zu 10.000 gelöscht, dazwischen laufen Schreiben und Abfragen weiter. Eine Inspektion muss so auch bei einem großen Löschlauf nicht warten. Der Umzug nach dem Abbau einer Doppeltruhen-Hälfte läuft genauso in Blöcken.
 - Abfragen laufen asynchron, das Fenster öffnet sich danach auf dem Main-Thread. Der Main-Thread macht im laufenden Betrieb keine blockierende Datei- oder Datenbank-I/O (Ausnahme: das einmalige Einlesen der Dateien beim Start, siehe [Abweichungen](#abweichungen)).
 - Die Items werden als YAML gespeichert, höchstens 64 KB pro Eintrag. Größere Items (z. B. eine Shulkerkiste voller beschriebener Bücher) werden nur mit Material und Menge gespeichert und im Fenster mit „Item-Daten zu groß, nicht gespeichert“ markiert. Sonst könnte jemand mit solchen Items die Datenbank aufblähen. Eine Shulkerkiste voller verzauberter Ausrüstung bleibt deutlich darunter.
 - Lässt sich ein gespeichertes Item später nicht mehr lesen (z. B. nach einem Versionswechsel), zeigt das Fenster stattdessen das Material mit der Menge, und wenn auch das nicht geht, eine Barriere mit dem Materialnamen.
@@ -246,8 +246,8 @@ Punkte, an denen die Umsetzung von den Vorgaben abweicht oder die beim Schreiben
 
   `server-test.yml` zeigt an, ob der Treiber im Server-JAR enthalten ist.
 - **`admins.yml` wird mit SnakeYAML geschrieben** (das Spigot mitbringt) statt mit Bukkits `YamlConfiguration`, damit die Tests ohne Bukkit laufen. Das Format ist das vorgegebene; Datumswerte stehen in einfachen statt doppelten Anführungszeichen, beides ist gültiges YAML.
-- **Suche bei `add`:** `Bukkit.getOfflinePlayers()` läuft auf dem Main-Thread, weil es die Spielerliste des Servers liest; es listet dabei nur das Spielerdaten-Verzeichnis. Die Namen lesen manche Server-Versionen erst aus den einzelnen Spielerdateien, deshalb geschieht der Namensvergleich asynchron. Zusätzlich akzeptieren `add` und `remove` eine UUID, und mehrdeutige Namen werden nicht geraten.
-- **Items im Fenster:** Die Vorgabe lädt die Einträge in einer Abfrage und hält sie im Holder. Das geschieht weiterhin, nur das Item-YAML wird pro Seite nachgeladen. Sonst könnten 2000 Einträge mit großen Items beim Inspizieren viel Speicher belegen.
+- **Suche bei `add`:** `Bukkit.getOfflinePlayers()` liest das Spielerdaten-Verzeichnis und teils die Spielerdateien und läuft deshalb asynchron. Die Bukkit-API ist dafür nicht ausdrücklich als threadsicher dokumentiert. Schlägt die Suche fehl (etwa weil gleichzeitig jemand joint), bekommt der Absender „Die Spielersuche ist fehlgeschlagen, bitte nochmal versuchen.“ und im Log steht eine Warnung. Zusätzlich akzeptieren `add` und `remove` eine UUID, und mehrdeutige Namen werden nicht geraten.
+- **Items im Fenster:** Die Vorgabe lädt die Einträge in einer Abfrage und hält sie im Holder. Das geschieht weiterhin, nur das Item-YAML wird pro Seite nachgeladen und mit höchstens 3 ms pro Tick dekodiert. Sonst könnten 2000 Einträge mit großen Items beim Inspizieren viel Speicher belegen oder einen Lag-Spike auslösen.
 - **Größenlimit für Items:** siehe [Datenhaltung](#datenhaltung), 64 KB pro Eintrag.
 - **Bündel:** werden im Diff mit ihrem Inhalt gezählt, siehe [Was geloggt wird](#was-geloggt-wird).
 - **Datei-I/O beim Start:** `config.yml`, `admins.yml` und das Öffnen der Datenbank laufen einmalig in `onEnable` auf dem Main-Thread, wie bei Bukkit-Plugins üblich. Im laufenden Betrieb (Logging, Inspizieren, Befehle, `reload`) gibt es keine blockierende I/O auf dem Main-Thread.

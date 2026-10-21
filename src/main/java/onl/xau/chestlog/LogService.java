@@ -86,7 +86,7 @@ public final class LogService {
         writer.submit(new LogEntry(0, now, pos, player.getUniqueId(), player.getName(),
                 LogAction.BREAK, target.material().name(), 1, null));
         if (target.isDouble() && remaining != null) {
-            writer.relocate(broken, remaining).exceptionally(e -> {
+            writer.relocate(broken, remaining, now).exceptionally(e -> {
                 logger.log(Level.SEVERE, "Einträge von " + broken.coordinates() + " konnten nicht nach "
                         + remaining.coordinates() + " verschoben werden", e);
                 return 0;

@@ -95,7 +95,7 @@ class LogWriterTest {
     void loeschenUeberMehrereBloecke() throws Exception {
         try (LogWriter writer = new LogWriter(LogDatabase.open(dir.resolve("g.db")), LOGGER, 1_000,
                 Duration.ofHours(1))) {
-            int old = LogWriter.PURGE_CHUNK * 2 + 123;
+            int old = LogWriter.CHUNK_SIZE * 2 + 123;
             for (int i = 0; i < old; i++) {
                 writer.submit(entry(i));
             }
@@ -113,9 +113,25 @@ class LogWriterTest {
             writer.submit(entry(1_000));
             writer.submit(entry(2_000));
 
-            assertEquals(2, writer.relocate(POS, NEIGHBOUR).get(10, TimeUnit.SECONDS));
+            assertEquals(2, writer.relocate(POS, NEIGHBOUR, 2_000).get(10, TimeUnit.SECONDS));
             assertEquals(2, writer.query(List.of(NEIGHBOUR), 10).get(10, TimeUnit.SECONDS).entries().size());
             assertEquals(0, writer.query(List.of(POS), 10).get(10, TimeUnit.SECONDS).entries().size());
+        }
+    }
+
+    @Test
+    void umzugInBloeckenUndNurBisZumAbbau() throws Exception {
+        try (LogWriter writer = new LogWriter(LogDatabase.open(dir.resolve("h.db")), LOGGER, 1_000,
+                Duration.ofHours(1))) {
+            int before = LogWriter.CHUNK_SIZE + 77;
+            for (int i = 0; i < before; i++) {
+                writer.submit(entry(i));
+            }
+            // nach dem Abbau an derselben Stelle: gehört zu einem neuen Container
+            writer.submit(entry(1_000_000));
+
+            assertEquals(before, writer.relocate(POS, NEIGHBOUR, 500_000).get(30, TimeUnit.SECONDS));
+            assertEquals(1, writer.query(List.of(POS), 10).get(10, TimeUnit.SECONDS).entries().size());
         }
     }
 

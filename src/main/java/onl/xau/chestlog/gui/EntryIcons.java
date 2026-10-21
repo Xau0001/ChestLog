@@ -86,8 +86,8 @@ final class EntryIcons {
     }
 
     private static ItemStack materialItem(LogEntry entry) {
-        Material material = entry.material() == null ? null : Material.matchMaterial(entry.material());
-        if (material != null && material.isItem() && !material.isAir()) {
+        Material material = itemMaterial(entry);
+        if (material != null) {
             return new ItemStack(material);
         }
         return LogGui.named(Material.BARRIER,
@@ -95,7 +95,13 @@ final class EntryIcons {
     }
 
     private static Material containerMaterial(LogEntry entry) {
+        Material material = itemMaterial(entry);
+        return material != null ? material : Material.CHEST;
+    }
+
+    /** Das gespeicherte Material, wenn es als Item darstellbar ist, sonst {@code null}. */
+    private static Material itemMaterial(LogEntry entry) {
         Material material = entry.material() == null ? null : Material.matchMaterial(entry.material());
-        return material != null && material.isItem() && !material.isAir() ? material : Material.CHEST;
+        return material != null && material.isItem() && !material.isAir() ? material : null;
     }
 }

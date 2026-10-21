@@ -29,7 +29,7 @@ import onl.xau.chestlog.model.LogEntry;
 public final class LogWriter implements AutoCloseable {
 
     private static final int MAX_PER_TRANSACTION = 1000;
-    static final int PURGE_CHUNK = 10_000;
+    static final int CHUNK_SIZE = 10_000;
 
     private final LogDatabase database;
     private final Logger logger;
@@ -88,12 +88,12 @@ public final class LogWriter implements AutoCloseable {
         return supply(() -> database.loadItems(copy));
     }
 
-    /** Verschiebt asynchron alle Einträge (auch die noch eingereihten) von {@code from} nach {@code to}. */
-    public CompletableFuture<Integer> relocate(BlockPos from, BlockPos to) {
-        return supply(() -> {
-            flush();
-            return database.relocate(from, to);
-        });
+    /**
+     * Verschiebt asynchron alle Einträge (auch die noch eingereihten) mit Zeitstempel bis {@code maxTimestamp} von
+     * {@code from} nach {@code to}, in Blöcken wie {@link #deleteOlderThan}. Liefert die Anzahl.
+     */
+    public CompletableFuture<Integer> relocate(BlockPos from, BlockPos to, long maxTimestamp) {
+        return inChunks(() -> database.relocate(from, to, maxTimestamp, CHUNK_SIZE));
     }
 
     /**
@@ -101,29 +101,39 @@ public final class LogWriter implements AutoCloseable {
      * in Blöcken; jeder weitere Block wird hinten angestellt, damit Schreiben und Abfragen dazwischen laufen.
      */
     public CompletableFuture<Integer> deleteOlderThan(long cutoffMillis) {
+        return inChunks(() -> database.deleteOlderThan(cutoffMillis, CHUNK_SIZE));
+    }
+
+    /** Eine Änderung an höchstens {@link #CHUNK_SIZE} Zeilen; liefert die Anzahl geänderter Zeilen. */
+    @FunctionalInterface
+    private interface SqlChunk {
+        int run() throws SQLException;
+    }
+
+    private CompletableFuture<Integer> inChunks(SqlChunk chunk) {
         CompletableFuture<Integer> result = new CompletableFuture<>();
-        deleteChunk(cutoffMillis, 0, result);
+        runChunk(chunk, 0, result);
         return result;
     }
 
-    private void deleteChunk(long cutoffMillis, int deletedSoFar, CompletableFuture<Integer> result) {
+    private void runChunk(SqlChunk chunk, int doneSoFar, CompletableFuture<Integer> result) {
         try {
             executor.execute(() -> {
                 try {
                     flush();
-                    int deleted = database.deleteOlderThan(cutoffMillis, PURGE_CHUNK);
-                    if (deleted < PURGE_CHUNK) {
-                        result.complete(deletedSoFar + deleted);
+                    int done = chunk.run();
+                    if (done < CHUNK_SIZE) {
+                        result.complete(doneSoFar + done);
                     } else {
-                        deleteChunk(cutoffMillis, deletedSoFar + deleted, result);
+                        runChunk(chunk, doneSoFar + done, result);
                     }
                 } catch (SQLException | RuntimeException e) {
                     result.completeExceptionally(e);
                 }
             });
         } catch (RejectedExecutionException e) {
-            // beim Herunterfahren abgebrochen, der Rest folgt beim nächsten Start
-            result.complete(deletedSoFar);
+            // beim Herunterfahren abgebrochen
+            result.complete(doneSoFar);
         }
     }
 

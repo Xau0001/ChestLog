@@ -41,10 +41,13 @@ public final class ContainerResolver {
             return null;
         }
         Material type = block.getType();
-        if (!isAllowed(type, block.getWorld()) || !isContainer(block)) {
+        if (type == Material.ENDER_CHEST || settings.get().isWorldDisabled(block.getWorld()) || !isContainer(block)) {
             return null;
         }
         Block other = otherChestHalf(block);
+        if (!isAllowed(type, other == null ? null : other.getType())) {
+            return null;
+        }
         return other == null ? single(block, type) : pair(block, other, type);
     }
 
@@ -56,7 +59,7 @@ public final class ContainerResolver {
                 && doubleChest.getRightSide() instanceof BlockState right) {
             Block block = left.getBlock();
             Material type = block.getType();
-            if (!isAllowed(type, block.getWorld())) {
+            if (settings.get().isWorldDisabled(block.getWorld()) || !isAllowed(type, right.getType())) {
                 return null;
             }
             containerMaterials.put(type, true);
@@ -66,11 +69,14 @@ public final class ContainerResolver {
         if (holder instanceof Container container) {
             Block block = container.getBlock();
             Material type = block.getType();
-            if (!isAllowed(type, block.getWorld())) {
+            if (settings.get().isWorldDisabled(block.getWorld())) {
+                return null;
+            }
+            Block other = otherChestHalf(block);
+            if (!isAllowed(type, other == null ? null : other.getType())) {
                 return null;
             }
             containerMaterials.put(type, true);
-            Block other = otherChestHalf(block);
             return other == null ? single(block, type) : pair(block, other, type);
         }
         return null;
@@ -98,9 +104,12 @@ public final class ContainerResolver {
         return new BlockPos(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ());
     }
 
-    private boolean isAllowed(Material type, World world) {
+    // Laut Config erfasst? Bei einer Doppeltruhe genügt eine Hälfte: Kupfertruhen-Hälften können verschiedene
+    // Materialien haben, und derselbe Container soll unabhängig vom Zugriffsweg gleich behandelt werden.
+    private boolean isAllowed(Material type, Material otherHalf) {
         PluginConfig config = settings.get();
-        return type != Material.ENDER_CHEST && config.isContainerAllowed(type) && !config.isWorldDisabled(world);
+        return type != Material.ENDER_CHEST
+                && (config.isContainerAllowed(type) || otherHalf != null && config.isContainerAllowed(otherHalf));
     }
 
     private boolean isContainer(Block block) {

@@ -238,7 +238,7 @@ class LogDatabaseTest {
                 entry(RIGHT, 3_000, LogAction.ADD, "C", 1),
                 entry(OTHER, 4_000, LogAction.ADD, "D", 1)));
 
-        assertEquals(2, db.relocate(LEFT, RIGHT));
+        assertEquals(2, db.relocate(LEFT, RIGHT, 2_000, 100));
 
         assertEquals(List.of("C", "B", "A"),
                 db.query(List.of(RIGHT), 10).entries().stream().map(LogEntry::material).toList());
@@ -247,8 +247,26 @@ class LogDatabaseTest {
     }
 
     @Test
+    void umzugNurBisZumZeitpunktUndBlockweise() throws SQLException {
+        db.insert(List.of(
+                entry(LEFT, 1_000, LogAction.ADD, "A", 1),
+                entry(LEFT, 2_000, LogAction.ADD, "B", 1),
+                entry(LEFT, 3_000, LogAction.ADD, "C", 1),
+                entry(LEFT, 9_000, LogAction.PLACE, "BARREL", 1)));
+
+        assertEquals(2, db.relocate(LEFT, RIGHT, 3_000, 2));
+        assertEquals(1, db.relocate(LEFT, RIGHT, 3_000, 2));
+        assertEquals(0, db.relocate(LEFT, RIGHT, 3_000, 2));
+
+        assertEquals(List.of("BARREL"),
+                db.query(List.of(LEFT), 10).entries().stream().map(LogEntry::material).toList());
+        assertEquals(3, db.query(List.of(RIGHT), 10).entries().size());
+    }
+
+    @Test
     void umzugNurInnerhalbEinerWelt() {
-        assertThrows(IllegalArgumentException.class, () -> db.relocate(LEFT, new BlockPos(NETHER, 10, 64, 20)));
+        assertThrows(IllegalArgumentException.class,
+                () -> db.relocate(LEFT, new BlockPos(NETHER, 10, 64, 20), Long.MAX_VALUE, 100));
     }
 
     @Test

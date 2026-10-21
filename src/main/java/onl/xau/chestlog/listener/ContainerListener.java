@@ -212,8 +212,10 @@ public final class ContainerListener implements Listener {
         }
         // Materialname zuerst prüfen: getItemMeta() legt jedes Mal eine Kopie an.
         if (depth < MAX_BUNDLE_DEPTH && stack.getType().name().endsWith("BUNDLE")
-                && stack.getItemMeta() instanceof BundleMeta bundle && bundle.hasItems()) {
-            List<ItemStack> contents = bundle.getItems();
+                && stack.getItemMeta() instanceof BundleMeta bundle) {
+            List<ItemStack> contents = bundle.hasItems() ? bundle.getItems() : List.of();
+            // Jedes Bündel, auch ein schon leeres, geht durch dieselbe Meta-Umwandlung. So ergeben ein geleertes und
+            // ein von Vanilla leer erzeugtes Bündel denselben Schlüssel.
             ItemStack empty = stack.clone();
             BundleMeta emptyMeta = (BundleMeta) empty.getItemMeta();
             emptyMeta.setItems(null);

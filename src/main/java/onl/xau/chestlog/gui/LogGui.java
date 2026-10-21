@@ -49,6 +49,8 @@ public final class LogGui implements Listener {
     private static final int ENTRY_SLOTS = LogGuiHolder.ROWS * Scroller.COLUMNS;
     // sichtbare Seite und die nächste, damit Scrollen um eine Zeile meist schon geladen ist
     private static final int ITEM_WINDOW = 2 * ENTRY_SLOTS;
+    // Höchstens so lange pro Tick Items dekodieren, der Rest folgt in den nächsten Ticks (gegen Lag bei großen Items).
+    private static final long DECODE_BUDGET_NANOS = 3_000_000;
     private static final int SLOT_PAGE_UP = 45;
     private static final int SLOT_ROW_UP = 46;
     private static final int SLOT_FILTER = 48;
@@ -83,6 +85,11 @@ public final class LogGui implements Listener {
         String coordinates = ContainerResolver.pos(clicked).coordinates();
         log.query(target)
                 .thenCompose(result -> log.loadItems(itemIds(firstWindow(result)))
+                        .exceptionally(e -> {
+                            // Die Liste ist da; die Items lädt das Fenster beim Zeichnen noch einmal nach.
+                            plugin.getLogger().log(Level.WARNING, "Items für das Log-Fenster nicht geladen", e);
+                            return null;
+                        })
                         .thenApply(items -> new Loaded(result, items)))
                 .whenComplete((loaded, error) -> plugin.runSync(() -> {
                     loading.remove(id);
@@ -97,7 +104,9 @@ public final class LogGui implements Listener {
                         return;
                     }
                     LogGuiHolder holder = new LogGuiHolder(target, coordinates, loaded.result());
-                    storeItems(holder, firstWindow(loaded.result()), loaded.items());
+                    if (loaded.items() != null) {
+                        storeRaw(holder, firstWindow(loaded.result()), loaded.items());
+                    }
                     show(player, holder);
                 }));
     }
@@ -193,12 +202,27 @@ public final class LogGui implements Listener {
         Scroller scroller = holder.scroller();
         ItemStack[] contents = new ItemStack[SIZE];
 
+        long deadline = System.nanoTime() + DECODE_BUDGET_NANOS;
+        boolean decodedAny = false;
+        boolean deferred = false;
         for (int i = 0; i < ENTRY_SLOTS; i++) {
             int index = scroller.offset() + i;
-            if (index < visible.size()) {
-                LogEntry entry = visible.get(index);
-                contents[i] = EntryIcons.icon(entry, holder.item(entry), now, config.timezone());
+            if (index >= visible.size()) {
+                break;
             }
+            LogEntry entry = visible.get(index);
+            ItemStack item = holder.item(entry);
+            if (item == null && LogGuiHolder.hasItem(entry) && holder.hasRaw(entry)) {
+                // mindestens eins pro Durchgang, damit es auch bei einem sehr großen Item weitergeht
+                if (!decodedAny || System.nanoTime() < deadline) {
+                    item = EntryIcons.decode(entry, holder.takeRaw(entry));
+                    holder.putItem(entry, item);
+                    decodedAny = true;
+                } else {
+                    deferred = true;
+                }
+            }
+            contents[i] = EntryIcons.icon(entry, item, now, config.timezone());
         }
         if (visible.isEmpty()) {
             contents[SLOT_EMPTY_NOTICE] = holder.filter() == LogFilter.ALL
@@ -224,7 +248,22 @@ public final class LogGui implements Listener {
         contents[SLOT_CLOSE] = named(Material.BARRIER, ChatColor.RED + "Schließen");
 
         holder.getInventory().setContents(contents);
+        if (deferred) {
+            renderNextTick(holder);
+        }
         loadMissingItems(holder);
+    }
+
+    private void renderNextTick(LogGuiHolder holder) {
+        if (!holder.scheduleRender()) {
+            return;
+        }
+        plugin.runSync(() -> {
+            holder.renderDone();
+            if (!holder.getInventory().getViewers().isEmpty()) {
+                render(holder);
+            }
+        });
     }
 
     /** Lädt das Item-YAML für die sichtbare und die nächste Seite nach und zeichnet danach neu. */
@@ -240,7 +279,7 @@ public final class LogGui implements Listener {
                 plugin.getLogger().log(Level.SEVERE, "Items für das Log-Fenster konnten nicht geladen werden", error);
             }
             // auch bei einem Fehler eintragen (dann als Material), sonst würde es endlos neu versucht
-            storeItems(holder, missing, items == null ? Map.of() : items);
+            storeRaw(holder, missing, items == null ? Map.of() : items);
             holder.unmarkLoading(missing);
             if (!holder.getInventory().getViewers().isEmpty()) {
                 render(holder);
@@ -248,10 +287,11 @@ public final class LogGui implements Listener {
         }));
     }
 
-    private static void storeItems(LogGuiHolder holder, List<LogEntry> entries, Map<Long, String> items) {
+    // Dekodiert wird erst beim Zeichnen, mit Zeitbudget.
+    private static void storeRaw(LogGuiHolder holder, List<LogEntry> entries, Map<Long, String> items) {
         for (LogEntry entry : entries) {
             if (LogGuiHolder.hasItem(entry)) {
-                holder.putItem(entry, EntryIcons.decode(entry, items.get(entry.id())));
+                holder.putRaw(entry, items.get(entry.id()));
             }
         }
     }

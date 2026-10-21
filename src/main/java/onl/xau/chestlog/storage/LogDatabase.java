@@ -200,19 +200,22 @@ public final class LogDatabase implements AutoCloseable {
     }
 
     /**
-     * Verschiebt alle Einträge von {@code from} nach {@code to} (gleiche Welt), z. B. von einer abgebauten
-     * Doppeltruhen-Hälfte auf die stehengebliebene. Liefert die Anzahl der verschobenen Einträge.
+     * Verschiebt höchstens {@code limit} Einträge mit Zeitstempel bis {@code maxTimestamp} von {@code from} nach
+     * {@code to} (gleiche Welt), z. B. von einer abgebauten Doppeltruhen-Hälfte auf die stehengebliebene. Spätere
+     * Einträge gehören zu einem neuen Container an der Stelle und bleiben. Liefert die Anzahl der verschobenen Einträge.
      */
-    public int relocate(BlockPos from, BlockPos to) throws SQLException {
+    public int relocate(BlockPos from, BlockPos to, long maxTimestamp, int limit) throws SQLException {
         if (!from.world().equals(to.world())) {
             throw new IllegalArgumentException("Umzug nur innerhalb einer Welt: " + from + " -> " + to);
         }
-        try (PreparedStatement ps = connection.prepareStatement(
-                "UPDATE log SET x = ?, y = ?, z = ? WHERE " + whereClause(1))) {
+        try (PreparedStatement ps = connection.prepareStatement("UPDATE log SET x = ?, y = ?, z = ? WHERE id IN "
+                + "(SELECT id FROM log WHERE " + whereClause(1) + " AND ts <= ? LIMIT ?)")) {
             ps.setInt(1, to.x());
             ps.setInt(2, to.y());
             ps.setInt(3, to.z());
-            bindPositions(ps, List.of(from), 4);
+            int index = bindPositions(ps, List.of(from), 4);
+            ps.setLong(index, maxTimestamp);
+            ps.setInt(index + 1, limit);
             return ps.executeUpdate();
         }
     }
