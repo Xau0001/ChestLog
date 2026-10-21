@@ -92,6 +92,21 @@ class LogWriterTest {
     }
 
     @Test
+    void loeschenUeberMehrereBloecke() throws Exception {
+        try (LogWriter writer = new LogWriter(LogDatabase.open(dir.resolve("g.db")), LOGGER, 1_000,
+                Duration.ofHours(1))) {
+            int old = LogWriter.PURGE_CHUNK * 2 + 123;
+            for (int i = 0; i < old; i++) {
+                writer.submit(entry(i));
+            }
+            writer.submit(entry(1_000_000));
+
+            assertEquals(old, writer.deleteOlderThan(500_000).get(30, TimeUnit.SECONDS));
+            assertEquals(1, writer.query(List.of(POS), 10).get(10, TimeUnit.SECONDS).entries().size());
+        }
+    }
+
+    @Test
     void umzugErfasstAuchEingereihteEintraege() throws Exception {
         try (LogWriter writer = new LogWriter(LogDatabase.open(dir.resolve("f.db")), LOGGER, 100,
                 Duration.ofHours(1))) {

@@ -161,6 +161,7 @@ Erfasst werden alle Blöcke, deren BlockState ein Container ist: Truhe, Fallentr
 
 - SQLite-Datei `plugins/ChestLog/chestlog.db` im WAL-Modus (daneben liegen zur Laufzeit `chestlog.db-wal` und `chestlog.db-shm`).
 - Geschrieben wird über eine Queue auf einem eigenen Thread, gebündelt etwa jede Sekunde oder ab 100 Einträgen. Beim Stoppen des Servers wird alles geschrieben, auch noch offene Zusammenfassungen.
+- Alte Einträge (`retention-days`) werden in Blöcken zu 10.000 gelöscht, dazwischen laufen Schreiben und Abfragen weiter. Eine Inspektion muss so auch bei einem großen Löschlauf nicht warten.
 - Abfragen laufen asynchron, das Fenster öffnet sich danach auf dem Main-Thread. Der Main-Thread macht keine blockierende Datei- oder Datenbank-I/O (Ausnahme: das einmalige Einlesen der Dateien beim Start).
 - Die Items werden als YAML gespeichert. Lässt sich ein gespeichertes Item später nicht mehr lesen (z. B. nach einem Versionswechsel), zeigt das Fenster stattdessen das Material mit der Menge, und wenn auch das nicht geht, eine Barriere mit dem Materialnamen.
 - **Backup:** Bei gestopptem Server `chestlog.db` (und falls vorhanden `-wal`/`-shm`) zusammen mit `admins.yml` und `config.yml` kopieren.

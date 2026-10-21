@@ -157,10 +157,12 @@ public final class LogDatabase implements AutoCloseable {
         }
     }
 
-    /** Löscht alle Einträge, die älter als {@code cutoffMillis} sind, und liefert deren Anzahl. */
-    public int deleteOlderThan(long cutoffMillis) throws SQLException {
-        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM log WHERE ts < ?")) {
+    /** Löscht höchstens {@code limit} Einträge, die älter als {@code cutoffMillis} sind, und liefert deren Anzahl. */
+    public int deleteOlderThan(long cutoffMillis, int limit) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "DELETE FROM log WHERE id IN (SELECT id FROM log WHERE ts < ? LIMIT ?)")) {
             ps.setLong(1, cutoffMillis);
+            ps.setInt(2, limit);
             return ps.executeUpdate();
         }
     }

@@ -27,6 +27,7 @@ import onl.xau.chestlog.model.LogEntry;
 public final class LogWriter implements AutoCloseable {
 
     private static final int MAX_PER_TRANSACTION = 1000;
+    static final int PURGE_CHUNK = 10_000;
 
     private final LogDatabase database;
     private final Logger logger;
@@ -87,12 +88,35 @@ public final class LogWriter implements AutoCloseable {
         });
     }
 
-    /** Löscht asynchron alle Einträge, die älter als {@code cutoffMillis} sind. */
+    /**
+     * Löscht asynchron alle Einträge, die älter als {@code cutoffMillis} sind, und liefert deren Anzahl. Gelöscht wird
+     * in Blöcken; jeder weitere Block wird hinten angestellt, damit Schreiben und Abfragen dazwischen laufen.
+     */
     public CompletableFuture<Integer> deleteOlderThan(long cutoffMillis) {
-        return supply(() -> {
-            flush();
-            return database.deleteOlderThan(cutoffMillis);
-        });
+        CompletableFuture<Integer> result = new CompletableFuture<>();
+        deleteChunk(cutoffMillis, 0, result);
+        return result;
+    }
+
+    private void deleteChunk(long cutoffMillis, int deletedSoFar, CompletableFuture<Integer> result) {
+        try {
+            executor.execute(() -> {
+                try {
+                    flush();
+                    int deleted = database.deleteOlderThan(cutoffMillis, PURGE_CHUNK);
+                    if (deleted < PURGE_CHUNK) {
+                        result.complete(deletedSoFar + deleted);
+                    } else {
+                        deleteChunk(cutoffMillis, deletedSoFar + deleted, result);
+                    }
+                } catch (SQLException | RuntimeException e) {
+                    result.completeExceptionally(e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // beim Herunterfahren abgebrochen, der Rest folgt beim nächsten Start
+            result.complete(deletedSoFar);
+        }
     }
 
     /** Schreibt die Queue leer, beendet den DB-Thread und schließt die Datenbank. */

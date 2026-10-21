@@ -146,11 +146,27 @@ class LogDatabaseTest {
                 entry(LEFT, 2_000, LogAction.ADD, "NEW", 1),
                 entry(OTHER, 3_000, LogAction.ADD, "NEW", 1)));
 
-        assertEquals(2, db.deleteOlderThan(2_000));
+        assertEquals(2, db.deleteOlderThan(2_000, 100));
 
         assertEquals(List.of("NEW"),
                 db.query(List.of(LEFT, RIGHT), 10).entries().stream().map(LogEntry::material).toList());
         assertEquals(1, db.query(List.of(OTHER), 10).entries().size());
+    }
+
+    @Test
+    void altesLoeschenInBloecken() throws SQLException {
+        List<LogEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            entries.add(entry(LEFT, 1_000 + i, LogAction.ADD, "OLD", 1));
+        }
+        entries.add(entry(LEFT, 5_000, LogAction.ADD, "NEW", 1));
+        db.insert(entries);
+
+        assertEquals(10, db.deleteOlderThan(2_000, 10));
+        assertEquals(10, db.deleteOlderThan(2_000, 10));
+        assertEquals(5, db.deleteOlderThan(2_000, 10));
+        assertEquals(0, db.deleteOlderThan(2_000, 10));
+        assertEquals(List.of("NEW"), db.query(List.of(LEFT), 100).entries().stream().map(LogEntry::material).toList());
     }
 
     @Test
