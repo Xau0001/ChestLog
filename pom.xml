@@ -22,6 +22,7 @@
         <spigot.version>26.3-R0.1-SNAPSHOT</spigot.version>
         <sqlite.version>3.53.4.0</sqlite.version>
         <junit.version>5.13.4</junit.version>
+        <jetbrains-annotations.version>26.1.0</jetbrains-annotations.version>
     </properties>
 
     <repositories>
@@ -42,6 +43,14 @@
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot-api</artifactId>
             <version>${spigot.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Nur fürs Kompilieren: spigot-api ist damit annotiert, bringt sie aber nicht mit (sonst javac-Warnungen) -->
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>${jetbrains-annotations.version}</version>
             <scope>provided</scope>
         </dependency>
 

@@ -233,12 +233,12 @@ Paketstruktur unter `onl.xau.chestlog`:
 
 ## Abweichungen
 
-Punkte, an denen die Umsetzung von den Vorgaben abweicht oder die beim Schreiben nicht gegen einen echten 26.3-Server geprüft werden konnten:
+Punkte, an denen die Umsetzung von den Vorgaben abweicht oder die erst nachträglich geprüft werden konnten:
 
-- **Nicht gegen die echte API gebaut.** In der Umgebung, in der der Code entstanden ist, war `hub.spigotmc.org` gesperrt und Pushen nach GitHub nicht möglich. Die reine Logik (Diff, Zusammenfassen, SQLite, Admin-Datei, Scrollen) ist mit JDK 25 getestet, alle Tests grün. Der Bukkit-Teil wurde nur gegen eine selbst geschriebene Nachbildung der genutzten API-Signaturen kompiliert. Der erste echte Build und der Servertest laufen in GitHub Actions (`build.yml`, `server-test.yml`).
-- **Versionskennung der API:** `26.3-R0.1-SNAPSHOT` wie in der Vorgabe vermutet, nicht im Repository nachgesehen. Falls Maven die Version nicht findet: `server-test.yml` listet im ersten Schritt die tatsächlich vorhandenen Versionen auf; dann `spigot.version` in der `pom.xml` anpassen.
-- **`api-version`:** auf `'26.3'` gesetzt. Spigot lehnt nur Versionen ab, die neuer sind als der Server, ein 26.3-Server akzeptiert also `26.3`. Meldet der Server trotzdem „Unsupported API version“, in `plugin.yml` auf den Wert ändern, den `server-test.yml` im Schritt „Server-JAR untersuchen“ ausgibt.
-- **SQLite-Treiber:** Es wird davon ausgegangen, dass Spigot 26.3 `org.sqlite.JDBC` mitbringt (das tut Spigot seit vielen Versionen). Deshalb steht kein `libraries:`-Eintrag in der `plugin.yml`. Fehlt der Treiber, deaktiviert sich ChestLog mit der Meldung „SQLite-JDBC-Treiber (org.sqlite.JDBC) nicht gefunden“. Abhilfe: in der `plugin.yml` ergänzen
+- **Geprüft gegen Spigot 26.3:** Der Code ist gegen die echte `spigot-api` gebaut, alle Unit-Tests laufen in GitHub Actions. `server-test.yml` hat mit einem per BuildTools gebauten Spigot-26.3-Server bestätigt: ChestLog lädt und deaktiviert sich ohne Warnungen oder Fehler, und die Konsolenbefehle funktionieren (`help`, `list`, `add`, `remove`, `reload`, Alias `cl`). Die Checkliste im Spiel (siehe unten) ist damit nicht ersetzt.
+- **Versionskennung der API:** `26.3-R0.1-SNAPSHOT`, wie in der Vorgabe vermutet. Bestätigt: Spigot 26.3 bringt `spigot-api-26.3-R0.1-SNAPSHOT.jar` mit.
+- **`api-version`:** `'26.3'`. Bestätigt: Spigot 26.3 lädt das Plugin damit ohne Meldung.
+- **SQLite-Treiber:** Bestätigt: Spigot 26.3 bringt `sqlite-jdbc-3.53.4.0.jar` mit. Deshalb steht kein `libraries:`-Eintrag in der `plugin.yml`. Sollte eine spätere Spigot-Version den Treiber nicht mehr mitbringen, deaktiviert sich ChestLog mit der Meldung „SQLite-JDBC-Treiber (org.sqlite.JDBC) nicht gefunden“. Abhilfe ist dann ein Eintrag in der `plugin.yml`:
 
   ```yaml
   libraries:

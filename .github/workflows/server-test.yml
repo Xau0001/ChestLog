@@ -18,9 +18,9 @@ jobs:
     env:
       SPIGOT_REV: '26.3'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -33,7 +33,7 @@ jobs:
 
       - name: BuildTools-Cache
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/buildtools/out
           key: spigot-${{ env.SPIGOT_REV }}-v1
@@ -124,7 +124,7 @@ jobs:
           [ -s plugins/ChestLog/config.yml ] || fail "config.yml fehlt"
           echo "Servertest bestanden"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: server-log
