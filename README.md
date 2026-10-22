@@ -75,7 +75,7 @@ Jeder Eintrag zeigt:
 
 Darunter folgen Spieler, Zeit (`20.10.2026 18:46:12`, Zeitzone aus der Config) und die relative Zeit (`vor 5 Min.`). Bei Item-Icons bleibt der Name unverändert, damit der Client ihn in der eigenen Sprache anzeigt. Vorhandene Lore des Items bleibt erhalten, die Log-Zeilen stehen darunter. Die Icon-Anzahl entspricht der Menge, begrenzt auf die maximale Stackgröße; die genaue Menge steht in der Lore.
 
-Aus dem Fenster lässt sich nichts herausnehmen und nichts hineinlegen (Klick, Shift-Klick, Zahlentasten, Doppelklick, Drag, Q). Die Icons sind Kopien der geloggten Items ohne deren Plugin-Daten (PersistentDataContainer). So kann ein anderes Plugin, das auf seine eigenen Item-Markierungen reagiert, nicht aus dem Log-Fenster heraus ausgelöst werden.
+Aus dem Fenster lässt sich nichts herausnehmen und nichts hineinlegen (Klick, Shift-Klick, Zahlentasten, Doppelklick, Drag, Q). Jeder Klick wird abgebrochen, zu Beginn und noch einmal am Ende der Event-Verarbeitung. Zusätzlich sind die Icons Kopien der geloggten Items ohne deren Plugin-Daten (PersistentDataContainer). Ein Plugin, das abgebrochene Klicks trotzdem auswertet und seine Items an diesen Daten erkennt, reagiert also nicht auf die Kopie im Log-Fenster.
 
 Die Einträge werden beim Öffnen auf einmal geladen, die Item-Daten aber nur für die sichtbare und die nächste Seite. Dekodiert werden sie mit einem festen Zeitbudget pro Tick. Bei sehr großen Items oder beim schnellen Blättern stehen deshalb kurz Platzhalter mit „lädt …“ im Fenster. So bleiben Speicherbedarf und Lag klein, auch bei 2000 Einträgen mit großen Items.
 
@@ -206,7 +206,8 @@ Die Abhängigkeit `org.spigotmc:spigot-api` (Scope `provided`) kommt aus `https:
 
 - `InventoryDiffTest`: Hinzufügen, Entnehmen, Umsortieren (kein Eintrag), Tausch zweier Item-Arten, teilweise Stacks, leere Inventare
 - `EntryMergerTest`: Zusammenfassen im Zeitfenster, Trennen danach, getrennte Richtungen/Spieler/Container, OPEN nur einmal pro Fenster
-- `AdminStoreTest`: `admins.yml` lesen, schreiben (atomar), Name aktualisieren, letzten Admin schützen
+- `AdminStoreTest`: `admins.yml` lesen, schreiben (atomar), Name aktualisieren, letzten Admin schützen, gleiche Namen erkennen
+- `ConfigReaderTest`: Typprüfung der `config.yml` (falsche Typen, fehlende Werte, keine Liste, unbekannte Schlüssel)
 - `LogDatabaseTest` / `LogWriterTest`: gegen eine temporäre SQLite-Datei: Insert, Abfrage beider Doppeltruhen-Hälften, Sortierung, Limit mit Gesamtzahl, Purge, Umzug nach Abbau einer Hälfte, Nutzung des Index, Queue und Batches
 - `ScrollerTest`, `TimeFormatTest`: Scrollen im Fenster, Zeitangaben
 

@@ -118,7 +118,11 @@ public final class LogDatabase implements AutoCloseable {
             ps.executeBatch();
             connection.commit();
         } catch (SQLException | RuntimeException e) {
-            connection.rollback();
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
             throw e;
         } finally {
             connection.setAutoCommit(autoCommit);

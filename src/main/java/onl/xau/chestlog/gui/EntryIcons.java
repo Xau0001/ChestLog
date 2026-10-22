@@ -41,12 +41,6 @@ final class EntryIcons {
         if (meta == null) {
             return icon;
         }
-        // Plugin-Daten entfernen: Sonst könnte ein anderes Plugin, das auf Klicks mit seinen eigenen Item-Markierungen
-        // reagiert, aus dem Log-Fenster heraus ausgelöst werden. Sichtbar sind diese Daten ohnehin nicht.
-        PersistentDataContainer data = meta.getPersistentDataContainer();
-        for (NamespacedKey key : List.copyOf(data.getKeys())) {
-            data.remove(key);
-        }
         // Anzeigenamen nicht überschreiben (der Client zeigt ihn in der eigenen Sprache), Log-Zeilen unter die Lore.
         List<String> existing = meta.hasLore() ? meta.getLore() : null;
         List<String> lore = existing == null ? new ArrayList<>() : new ArrayList<>(existing);
@@ -69,7 +63,7 @@ final class EntryIcons {
     static ItemStack decode(LogEntry entry, String yaml) {
         ItemStack decoded = ItemCodec.decode(yaml);
         if (decoded != null) {
-            return decoded;
+            return withoutPluginData(decoded);
         }
         ItemStack fallback = materialItem(entry);
         if (ItemCodec.OMITTED.equals(yaml)) {
@@ -80,6 +74,27 @@ final class EntryIcons {
             }
         }
         return fallback;
+    }
+
+    /**
+     * Entfernt die Plugin-Daten (PersistentDataContainer). Zusätzlicher Schutz neben dem Abbrechen jedes Klicks: Ein
+     * Plugin, das abgebrochene Klicks trotzdem auswertet und seine Items an diesen Daten erkennt, reagiert dann nicht
+     * auf die Kopie im Log-Fenster. Sichtbar sind diese Daten ohnehin nicht.
+     */
+    private static ItemStack withoutPluginData(ItemStack stack) {
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) {
+            return stack;
+        }
+        PersistentDataContainer data = meta.getPersistentDataContainer();
+        if (data.getKeys().isEmpty()) {
+            return stack;
+        }
+        for (NamespacedKey key : List.copyOf(data.getKeys())) {
+            data.remove(key);
+        }
+        stack.setItemMeta(meta);
+        return stack;
     }
 
     static String actionLine(LogEntry entry) {

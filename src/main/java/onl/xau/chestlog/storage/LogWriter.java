@@ -50,7 +50,7 @@ public final class LogWriter implements AutoCloseable {
             return t;
         });
         long interval = Math.max(1, flushInterval.toMillis());
-        executor.scheduleWithFixedDelay(this::flushSafely, interval, interval, TimeUnit.MILLISECONDS);
+        executor.scheduleWithFixedDelay(this::flush, interval, interval, TimeUnit.MILLISECONDS);
     }
 
     /** Reiht einen Eintrag zum Schreiben ein. Darf von jedem Thread aufgerufen werden. */
@@ -63,7 +63,7 @@ public final class LogWriter implements AutoCloseable {
         queue.add(entry);
         if (queued.incrementAndGet() >= batchSize && flushScheduled.compareAndSet(false, true)) {
             try {
-                executor.execute(this::flushSafely);
+                executor.execute(this::flush);
             } catch (RejectedExecutionException e) {
                 flushScheduled.set(false);
             }
@@ -78,8 +78,7 @@ public final class LogWriter implements AutoCloseable {
     /** Lädt asynchron die neuesten Einträge an den Positionen. */
     public CompletableFuture<QueryResult> query(List<BlockPos> positions, int limit) {
         return supply(() -> {
-            // Ein Schreibfehler wird geloggt, darf die Abfrage aber nicht verhindern.
-            flushSafely();
+            flush();
             return database.query(positions, limit);
         });
     }
@@ -122,7 +121,7 @@ public final class LogWriter implements AutoCloseable {
         try {
             executor.execute(() -> {
                 try {
-                    flushSafely();
+                    flush();
                     int done = chunk.run();
                     if (done < CHUNK_SIZE) {
                         result.complete(doneSoFar + done);
@@ -158,7 +157,7 @@ public final class LogWriter implements AutoCloseable {
             executor.shutdownNow();
         }
         // Nach dem Ende des DB-Threads ist dieser Thread der einzige Nutzer der Verbindung.
-        flushSafely();
+        flush();
         try {
             database.close();
         } catch (SQLException e) {
@@ -166,15 +165,11 @@ public final class LogWriter implements AutoCloseable {
         }
     }
 
-    private void flushSafely() {
-        try {
-            flush();
-        } catch (SQLException | RuntimeException e) {
-            logger.log(Level.SEVERE, "Log-Einträge konnten nicht gespeichert werden", e);
-        }
-    }
-
-    private void flush() throws SQLException {
+    /**
+     * Schreibt die Queue vollständig leer. Schlägt ein Batch fehl, wird nur er verworfen (und geloggt), die übrigen
+     * werden trotzdem geschrieben. So sehen Abfragen und Umzüge danach alles, was vor ihnen eingereiht wurde.
+     */
+    private void flush() {
         flushScheduled.set(false);
         while (true) {
             List<LogEntry> batch = new ArrayList<>();
@@ -187,8 +182,9 @@ public final class LogWriter implements AutoCloseable {
             }
             try {
                 database.insert(batch);
-            } catch (SQLException e) {
-                throw new SQLException(batch.size() + " Einträge verworfen: " + e.getMessage(), e);
+            } catch (SQLException | RuntimeException e) {
+                logger.log(Level.SEVERE, batch.size() + " Log-Einträge konnten nicht gespeichert werden und sind verworfen",
+                        e);
             } finally {
                 queued.addAndGet(-batch.size());
             }

@@ -232,6 +232,13 @@ public final class AdminStore {
         } catch (AtomicMoveNotSupportedException e) {
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
         }
+        // Auch das Umbenennen auf die Platte zwingen, sonst kann nach einem Stromausfall die alte Fassung zurückkommen
+        // (z. B. mit einem inzwischen entfernten Admin). Nicht jedes Dateisystem erlaubt das für Verzeichnisse.
+        try (FileChannel directory = FileChannel.open(dir, StandardOpenOption.READ)) {
+            directory.force(true);
+        } catch (IOException | UnsupportedOperationException e) {
+            // z. B. unter Windows; die Datei selbst ist geschrieben
+        }
     }
 
     // Von Hand eingetragene Zeitstempel ohne Anführungszeichen liest SnakeYAML als Date.

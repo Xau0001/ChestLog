@@ -9,7 +9,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -87,7 +86,7 @@ public final class ChestLogCommand implements TabExecutor {
                 return matching(names, args[1]);
             }
             if (sub.equals("remove")) {
-                return matching(admins.list().stream().map(Admin::name).filter(Objects::nonNull).toList(), args[1]);
+                return matching(removeCandidates(), args[1]);
             }
         }
         return List.of();
@@ -195,7 +194,9 @@ public final class ChestLogCommand implements TabExecutor {
             if (byName.size() > 1) {
                 sender.sendMessage(Messages.error("Mehrere Einträge heißen " + args[1]
                         + ". Bitte mit der UUID entfernen: /" + label + " remove <UUID>"));
-                byName.forEach(a -> sender.sendMessage(ChatColor.DARK_GRAY + " - " + ChatColor.WHITE + a.uuid()));
+                byName.forEach(a -> sender.sendMessage(ChatColor.DARK_GRAY + " - " + ChatColor.WHITE + a.uuid()
+                        + ChatColor.GRAY + " (" + displayName(a) + ", hinzugefügt von " + a.addedBy() + " am "
+                        + formatDate(a.addedAt()) + ")"));
                 return;
             }
             admin = byName.isEmpty() ? null : byName.getFirst();
@@ -282,6 +283,24 @@ public final class ChestLogCommand implements TabExecutor {
         } catch (DateTimeParseException e) {
             return isoDate;
         }
+    }
+
+    // Namen der Berechtigten; kommt ein Name (ohne Groß-/Kleinschreibung) mehrfach vor, stattdessen die UUIDs, denn
+    // remove mit diesem Namen wäre mehrdeutig.
+    private List<String> removeCandidates() {
+        Map<String, List<Admin>> byName = new LinkedHashMap<>();
+        for (Admin admin : admins.list()) {
+            byName.computeIfAbsent(displayName(admin).toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(admin);
+        }
+        List<String> candidates = new ArrayList<>();
+        for (List<Admin> group : byName.values()) {
+            if (group.size() == 1) {
+                candidates.add(displayName(group.getFirst()));
+            } else {
+                group.forEach(a -> candidates.add(a.uuid().toString()));
+            }
+        }
+        return candidates;
     }
 
     private static String displayName(Admin admin) {
