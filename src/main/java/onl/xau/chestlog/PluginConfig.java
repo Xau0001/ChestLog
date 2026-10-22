@@ -32,8 +32,14 @@ public record PluginConfig(
         disabledWorlds = Set.copyOf(disabledWorlds);
     }
 
+    private static final Set<String> KNOWN_KEYS = Set.of("tool", "log-open", "merge-window-seconds", "max-gui-entries",
+            "retention-days", "timezone", "protect-containers-with-tool", "containers", "disabled-worlds");
+    private static final Set<String> INT_KEYS = Set.of("merge-window-seconds", "max-gui-entries", "retention-days");
+    private static final Set<String> BOOLEAN_KEYS = Set.of("log-open", "protect-containers-with-tool");
+
     /** Liest die Werte; ungültige Angaben werden mit einer Warnung durch den Standard ersetzt. */
     public static PluginConfig from(ConfigurationSection c, Logger logger) {
+        checkTypes(c, logger);
         Material tool = DEFAULT_TOOL;
         String toolName = c.getString("tool", DEFAULT_TOOL.name());
         Material parsedTool = toolName == null ? null : Material.matchMaterial(toolName);
@@ -92,6 +98,34 @@ public record PluginConfig(
 
         return new PluginConfig(tool, c.getBoolean("log-open", true), mergeWindow, maxGuiEntries, retentionDays, zone,
                 c.getBoolean("protect-containers-with-tool", true), containers, disabledWorlds);
+    }
+
+    // Falsche Typen liefert die Bukkit-Config still als Standardwert; das soll nicht unbemerkt bleiben. Besonders bei
+    // containers: ohne Liste wären es sonst stillschweigend alle Container.
+    private static void checkTypes(ConfigurationSection c, Logger logger) {
+        for (String key : c.getKeys(false)) {
+            if (!KNOWN_KEYS.contains(key)) {
+                logger.warning("config.yml: unbekannter Schlüssel '" + key + "' wird ignoriert (Tippfehler?)");
+            }
+        }
+        for (String key : INT_KEYS) {
+            if (c.contains(key) && !c.isInt(key)) {
+                logger.warning("config.yml: " + key + " muss eine ganze Zahl sein, verwende den Standardwert");
+            }
+        }
+        for (String key : BOOLEAN_KEYS) {
+            if (c.contains(key) && !c.isBoolean(key)) {
+                logger.warning("config.yml: " + key + " muss true oder false sein, verwende den Standardwert");
+            }
+        }
+        if (c.contains("containers") && !c.isList("containers")) {
+            logger.warning("config.yml: containers muss eine Liste sein, z. B. [CHEST, BARREL]; "
+                    + "bis zur Korrektur werden alle Container geloggt");
+        }
+        if (c.contains("disabled-worlds") && !c.isList("disabled-worlds")) {
+            logger.warning("config.yml: disabled-worlds muss eine Liste sein, z. B. [world_nether]; "
+                    + "bis zur Korrektur wird in allen Welten geloggt");
+        }
     }
 
     public boolean isWorldDisabled(World world) {

@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -105,7 +106,7 @@ class AdminStoreTest {
         assertEquals("XauNeu", admin.name());
         assertEquals("CONSOLE", admin.addedBy());
         assertEquals("2026-10-20T18:50:00+02:00", admin.addedAt());
-        assertTrue(store.findByName("xauneu").isPresent());
+        assertEquals(List.of(store.get(XAU).orElseThrow()), store.findByName("xauneu"));
     }
 
     @Test
@@ -132,6 +133,16 @@ class AdminStoreTest {
         store.replaceAll(Map.of());
 
         assertEquals(start + 5, store.version());
+    }
+
+    @Test
+    void gleicherNameBeiZweiAccountsWirdErkannt() {
+        // z. B. hat Bob sich in Xau umbenannt, der alte Xau-Account steht noch mit dem Namen in der Liste
+        store.add(new Admin(XAU, "Xau", "CONSOLE", "x"));
+        store.add(new Admin(BOB, "xau", "CONSOLE", "y"));
+
+        assertEquals(2, store.findByName("XAU").size());
+        assertTrue(store.findByName("niemand").isEmpty());
     }
 
     @Test

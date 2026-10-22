@@ -75,7 +75,7 @@ Jeder Eintrag zeigt:
 
 Darunter folgen Spieler, Zeit (`20.10.2026 18:46:12`, Zeitzone aus der Config) und die relative Zeit (`vor 5 Min.`). Bei Item-Icons bleibt der Name unverändert, damit der Client ihn in der eigenen Sprache anzeigt. Vorhandene Lore des Items bleibt erhalten, die Log-Zeilen stehen darunter. Die Icon-Anzahl entspricht der Menge, begrenzt auf die maximale Stackgröße; die genaue Menge steht in der Lore.
 
-Aus dem Fenster lässt sich nichts herausnehmen und nichts hineinlegen (Klick, Shift-Klick, Zahlentasten, Doppelklick, Drag, Q).
+Aus dem Fenster lässt sich nichts herausnehmen und nichts hineinlegen (Klick, Shift-Klick, Zahlentasten, Doppelklick, Drag, Q). Die Icons sind Kopien der geloggten Items ohne deren Plugin-Daten (PersistentDataContainer). So kann ein anderes Plugin, das auf seine eigenen Item-Markierungen reagiert, nicht aus dem Log-Fenster heraus ausgelöst werden.
 
 Die Einträge werden beim Öffnen auf einmal geladen, die Item-Daten aber nur für die sichtbare und die nächste Seite. Dekodiert werden sie mit einem festen Zeitbudget pro Tick. Bei sehr großen Items oder beim schnellen Blättern stehen deshalb kurz Platzhalter mit „lädt …“ im Fenster. So bleiben Speicherbedarf und Lag klein, auch bei 2000 Einträgen mit großen Items.
 
@@ -96,7 +96,7 @@ Bei Doppeltruhen zeigt das Fenster immer die Einträge **beider Hälften**, auch
 
 - Erlaubt für die **Konsole** (auch RCON) und für Spieler aus `admins.yml`. Alle anderen bekommen „Dazu hast du keine Berechtigung.“ und keine Tab-Vervollständigung.
 - `add`: Der Spieler muss online sein oder schon einmal auf dem Server gewesen sein. Gesucht wird ohne Groß-/Kleinschreibung unter den bekannten Spielern des Servers, ohne Anfrage bei Mojang. Sonst: „Spieler war noch nie auf dem Server“. Trugen mehrere bekannte Accounts den Namen (z. B. nach einer Namensänderung), wird niemand eingetragen. Stattdessen listet der Befehl die UUIDs auf, und man fügt mit `add <UUID>` den richtigen hinzu.
-- `remove`: Den letzten Eintrag kann nur die Konsole entfernen, damit sich niemand aussperrt. Ein offenes Log-Fenster des Entfernten wird geschlossen, ebenso nach `reload`, wenn jemand nicht mehr in der Datei steht.
+- `remove`: Den letzten Eintrag kann nur die Konsole entfernen, damit sich niemand aussperrt. Tragen zwei Einträge denselben Namen, listet der Befehl die UUIDs auf, statt zu raten. Ein offenes Log-Fenster des Entfernten wird geschlossen, ebenso nach `reload`, wenn jemand nicht mehr in der Datei steht.
 - Tab-Vervollständigung: Unterbefehle, bei `add` Online-Spieler, bei `remove` Spieler aus der Liste.
 
 Es gibt **keine Bukkit-Permissions**. Wer berechtigt ist, steht ausschließlich in `admins.yml`.
@@ -113,7 +113,7 @@ admins:
     added-at: '2026-10-20T18:50:00+02:00'
 ```
 
-Die Datei wird atomar geschrieben (erst eine temporäre Datei, dann verschoben). Man kann sie auch von Hand bearbeiten und danach `/chestlog reload` ausführen. Ist sie beim Start nicht lesbar, wird sie nach `admins.yml.broken` verschoben und die Liste ist leer; das steht dann als Fehler im Server-Log.
+Die Datei wird atomar geschrieben: erst eine temporäre Datei, die auf die Platte gezwungen wird (`fsync`), dann verschoben. Auch nach einem Stromausfall liegt so entweder die alte oder die neue Fassung vor. Man kann sie auch von Hand bearbeiten und danach `/chestlog reload` ausführen. Ist sie beim Start nicht lesbar, wird sie nach `admins.yml.broken` verschoben und die Liste ist leer; das steht dann als Fehler im Server-Log.
 
 ## Konfiguration
 
@@ -143,7 +143,7 @@ disabled-worlds: []
 | `containers` | leer = alle Container; sonst z. B. `[CHEST, TRAPPED_CHEST, BARREL]`. Bei einer Doppeltruhe genügt es, wenn eine Hälfte in der Liste steht (Kupfertruhen-Hälften können verschiedene Stufen haben). |
 | `disabled-worlds` | Weltnamen, in denen nichts geloggt wird |
 
-Ungültige Werte (unbekanntes Material, unbekannte Zeitzone, negative Zahlen) werden mit einer Warnung im Log durch den Standardwert ersetzt.
+Ungültige Werte (unbekanntes Material, unbekannte Zeitzone, negative Zahlen, falscher Typ wie `merge-window-seconds: zehn`) werden mit einer Warnung im Log durch den Standardwert ersetzt. Unbekannte Schlüssel, meist Tippfehler, werden ebenfalls gemeldet. Steht bei `containers` keine Liste, sondern z. B. nur `CHEST`, warnt das Plugin und loggt bis zur Korrektur alle Container.
 
 ## Was geloggt wird
 

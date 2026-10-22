@@ -6,8 +6,10 @@ import java.util.List;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
 
 import onl.xau.chestlog.container.ItemCodec;
 import onl.xau.chestlog.model.LogAction;
@@ -38,6 +40,12 @@ final class EntryIcons {
         ItemMeta meta = icon.getItemMeta();
         if (meta == null) {
             return icon;
+        }
+        // Plugin-Daten entfernen: Sonst könnte ein anderes Plugin, das auf Klicks mit seinen eigenen Item-Markierungen
+        // reagiert, aus dem Log-Fenster heraus ausgelöst werden. Sichtbar sind diese Daten ohnehin nicht.
+        PersistentDataContainer data = meta.getPersistentDataContainer();
+        for (NamespacedKey key : List.copyOf(data.getKeys())) {
+            data.remove(key);
         }
         // Anzeigenamen nicht überschreiben (der Client zeigt ihn in der eigenen Sprache), Log-Zeilen unter die Lore.
         List<String> existing = meta.hasLore() ? meta.getLore() : null;

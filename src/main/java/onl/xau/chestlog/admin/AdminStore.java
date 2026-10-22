@@ -2,11 +2,14 @@ package onl.xau.chestlog.admin;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -87,8 +90,9 @@ public final class AdminStore {
         return Optional.ofNullable(admins.get(uuid));
     }
 
-    public Optional<Admin> findByName(String name) {
-        return admins.values().stream().filter(a -> a.name() != null && a.name().equalsIgnoreCase(name)).findFirst();
+    /** Alle Einträge mit diesem Namen (ohne Groß-/Kleinschreibung); mehrere, wenn sich jemand umbenannt hat. */
+    public List<Admin> findByName(String name) {
+        return admins.values().stream().filter(a -> a.name() != null && a.name().equalsIgnoreCase(name)).toList();
     }
 
     /** Alle Einträge, nach Namen sortiert. */
@@ -214,7 +218,15 @@ public final class AdminStore {
         Path dir = file.toAbsolutePath().getParent();
         Files.createDirectories(dir);
         Path tmp = dir.resolve(file.getFileName() + ".tmp");
-        Files.writeString(tmp, content, StandardCharsets.UTF_8);
+        // erst auf die Platte zwingen, dann verschieben: sonst kann nach einem Stromausfall eine leere Datei bleiben
+        try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING)) {
+            ByteBuffer buffer = ByteBuffer.wrap(content.getBytes(StandardCharsets.UTF_8));
+            while (buffer.hasRemaining()) {
+                channel.write(buffer);
+            }
+            channel.force(true);
+        }
         try {
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (AtomicMoveNotSupportedException e) {

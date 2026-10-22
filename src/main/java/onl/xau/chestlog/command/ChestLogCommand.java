@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -86,7 +87,7 @@ public final class ChestLogCommand implements TabExecutor {
                 return matching(names, args[1]);
             }
             if (sub.equals("remove")) {
-                return matching(admins.list().stream().map(Admin::name).filter(n -> n != null).toList(), args[1]);
+                return matching(admins.list().stream().map(Admin::name).filter(Objects::nonNull).toList(), args[1]);
             }
         }
         return List.of();
@@ -182,11 +183,23 @@ public final class ChestLogCommand implements TabExecutor {
 
     private void remove(CommandSender sender, String label, String[] args) {
         if (args.length != 2) {
-            sender.sendMessage(Messages.error("Benutzung: /" + label + " remove <Spieler>"));
+            sender.sendMessage(Messages.error("Benutzung: /" + label + " remove <Spieler oder UUID>"));
             return;
         }
         UUID uuid = parseUuid(args[1]);
-        Admin admin = uuid != null ? admins.get(uuid).orElse(null) : admins.findByName(args[1]).orElse(null);
+        Admin admin;
+        if (uuid != null) {
+            admin = admins.get(uuid).orElse(null);
+        } else {
+            List<Admin> byName = admins.findByName(args[1]);
+            if (byName.size() > 1) {
+                sender.sendMessage(Messages.error("Mehrere Einträge heißen " + args[1]
+                        + ". Bitte mit der UUID entfernen: /" + label + " remove <UUID>"));
+                byName.forEach(a -> sender.sendMessage(ChatColor.DARK_GRAY + " - " + ChatColor.WHITE + a.uuid()));
+                return;
+            }
+            admin = byName.isEmpty() ? null : byName.getFirst();
+        }
         if (admin == null) {
             sender.sendMessage(Messages.error(args[1] + " steht nicht in der Liste."));
             return;

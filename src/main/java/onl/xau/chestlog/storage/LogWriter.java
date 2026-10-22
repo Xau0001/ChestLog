@@ -56,7 +56,8 @@ public final class LogWriter implements AutoCloseable {
     /** Reiht einen Eintrag zum Schreiben ein. Darf von jedem Thread aufgerufen werden. */
     public void submit(LogEntry entry) {
         if (closed) {
-            logger.warning("Log-Eintrag nach dem Schließen der Datenbank verworfen: " + entry);
+            logger.warning("Log-Eintrag nach dem Schließen der Datenbank verworfen: " + entry.action() + " bei "
+                    + entry.pos().coordinates());
             return;
         }
         queue.add(entry);
@@ -77,7 +78,8 @@ public final class LogWriter implements AutoCloseable {
     /** Lädt asynchron die neuesten Einträge an den Positionen. */
     public CompletableFuture<QueryResult> query(List<BlockPos> positions, int limit) {
         return supply(() -> {
-            flush();
+            // Ein Schreibfehler wird geloggt, darf die Abfrage aber nicht verhindern.
+            flushSafely();
             return database.query(positions, limit);
         });
     }
@@ -120,7 +122,7 @@ public final class LogWriter implements AutoCloseable {
         try {
             executor.execute(() -> {
                 try {
-                    flush();
+                    flushSafely();
                     int done = chunk.run();
                     if (done < CHUNK_SIZE) {
                         result.complete(doneSoFar + done);
