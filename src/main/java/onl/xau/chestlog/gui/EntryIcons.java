@@ -12,7 +12,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 
 import onl.xau.chestlog.container.ItemCodec;
-import onl.xau.chestlog.model.LogAction;
 import onl.xau.chestlog.model.LogEntry;
 import onl.xau.chestlog.util.TimeFormat;
 
@@ -35,7 +34,8 @@ final class EntryIcons {
             icon = loading ? materialItem(entry) : item.clone();
             icon.setAmount(Math.clamp(entry.amount(), 1, Math.max(1, icon.getMaxStackSize())));
         } else {
-            icon = new ItemStack(entry.action() == LogAction.OPEN ? Material.CHEST : containerMaterial(entry));
+            // OPEN, PLACE, BREAK: der Container selbst (Truhe, Fass, Shulkerkiste …), der Client zeigt seinen Namen.
+            icon = new ItemStack(containerMaterial(entry));
         }
         ItemMeta meta = icon.getItemMeta();
         if (meta == null) {

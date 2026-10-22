@@ -69,7 +69,7 @@ Jeder Eintrag zeigt:
 | hineingelegt | das Item selbst | `+12 hineingelegt` (grün) |
 | entnommen | das Item selbst | `−3 entnommen` (rot) |
 | beim Abbau herausgefallen | das Item selbst | `−64 beim Abbau herausgefallen` (rot) |
-| geöffnet | Truhe | `geöffnet` (grau) |
+| geöffnet | der Container | `geöffnet` (grau) |
 | platziert | der Container | `platziert` (gelb) |
 | abgebaut | der Container | `abgebaut` (dunkelrot) |
 

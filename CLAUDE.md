@@ -97,7 +97,7 @@ Buttons, die am Anfang bzw. Ende nichts bewirken, werden als graues Glas dargest
 | `ADD` | Kopie des Items selbst | `§a+12 hineingelegt` |
 | `REMOVE` | Kopie des Items selbst | `§c−3 entnommen` |
 | `DROP` | Kopie des Items selbst | `§c−64 beim Abbau herausgefallen` |
-| `OPEN` | `CHEST` | `§7geöffnet` |
+| `OPEN` | Material des Containers | `§7geöffnet` |
 | `PLACE` | Material des Containers | `§eplatziert` |
 | `BREAK` | Material des Containers | `§4abgebaut` |
 
