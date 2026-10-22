@@ -1,0 +1,32 @@
+name: Release
+
+# Bei einem Tag wie v1.0.0 die JAR bauen und als Release-Asset anhängen.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Bauen und testen
+        # Version aus dem Tag (v1.2.3 -> 1.2.3), damit JAR-Name und plugin.yml zum Release passen
+        run: mvn -B -ntp verify -Drevision="${GITHUB_REF_NAME#v}"
+
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" target/ChestLog-*.jar --title "ChestLog $GITHUB_REF_NAME" --generate-notes
